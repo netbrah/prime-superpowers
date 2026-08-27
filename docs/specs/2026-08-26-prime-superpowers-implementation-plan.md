@@ -1,6 +1,6 @@
 # Prime Superpowers CLI Implementation Plan
 
-Status: draft, round 1 findings incorporated
+Status: draft, round 2 findings incorporated
 
 Design source: `docs/specs/2026-08-26-prime-superpowers-design.md`
 
@@ -9,7 +9,7 @@ Design source: `docs/specs/2026-08-26-prime-superpowers-design.md`
 - Task 0 creates an isolated worktree and `prime/kit-build-<run-id>` branch. No implementation commit lands on `main` or `master`.
 - The authoritative ledger is `.superpowers/sdd/2026-08-26-prime-superpowers-implementation-plan/progress.md` in that worktree. It records the target, worktree, branch, starting commit, plan hash, frozen acceptance commands, `BASE`, `HEAD`, red/green evidence, reviews, rulings, and outcome data.
 - Implement one numbered task at a time. A workflow worker owns product/test edits, red and green runs, gates, report, and commit. The coordinator only updates orchestration artifacts.
-- Every task has two red checkpoints when it introduces a module: an exact import/absence failure, followed by an importable fail-closed stub and the named behavioral assertion shown below. Green is not valid unless both are recorded.
+- Every task that introduces an imported ESM module has two red checkpoints: an exact import failure, followed by an importable fail-closed stub and the named behavioral assertion shown below. Shell-owned, directory-owned, and composition tasks state their own reachable absence and behavioral signatures. Green is not valid unless every task-specific checkpoint is recorded.
 - Red/green evidence records command, cwd, start/end timestamps, exit status, named failing subtest, stable failure substring, output-artifact path, and pre/post commit and tree hashes.
 - After green, record `HEAD`, build `BASE..HEAD`, and dispatch the sealed primary reviewer. Ordinary tasks also receive one cross-family reviewer. Protocol, security, persistence, and concurrency tasks receive Sol, Opus, and Gemini seats with an implementer outside the sealed Sol seat.
 - Review rounds are a loop with fresh reviewers and revised immutable ranges. The cap is five rounds; rounds four and five use frontier tiers. A Blocker/Major downgrade requires written concurrence from another family. A nonzero round-five result stops for the operator.
@@ -33,19 +33,21 @@ Task 2 commits `tests/fixtures/model-profiles.json`; tests compare exported reco
 
 | Role | ID/name | API | Input | Cost in/out/cache read/write | Context/max | Complete thinking map | Required compat |
 |---|---|---|---|---|---|---|---|
-| Sol | `gpt-5.6-sol` / GPT-5.6 Sol | `openai-responses` | text,image | 4/20/0.4/5 | 1,050,000/128,000 | off=`none`, minimal=null, low=`low`, medium=`medium`, high=`high`, xhigh=`xhigh`, max=`max` | supports long cache retention |
-| Terra | `gpt-5.6-terra` / GPT-5.6 Terra | `openai-responses` | text,image | 2/12/0.2/2.5 | 1,050,000/128,000 | off=`none`, minimal=null, low=`low`, medium=`medium`, high=`high`, xhigh=`xhigh`, max=`max` | supports long cache retention |
-| Opus | `claude-opus-5` / Claude Opus 5 | `anthropic-messages` | text,image | 5/25/0.5/6.25 | 1,000,000/128,000 | off=`off`, minimal=null, low=`low`, medium=`medium`, high=`high`, xhigh=`xhigh`, max=`max` | adaptive thinking and eager tool input streaming |
-| Sonnet | `claude-sonnet-5` / Claude Sonnet 5 | `anthropic-messages` | text,image | 2/10/0.2/2.5 | 1,000,000/128,000 | off=`off`, minimal=null, low=`low`, medium=`medium`, high=`high`, xhigh=`xhigh`, max=`max` | adaptive thinking and eager tool input streaming |
-| Gemini | `gemini-3.1-pro-preview` / Gemini 3.1 Pro Preview | `google-generative-ai` | text,image | 2/12/0.2/0 | 1,048,576/65,536 | off=null, minimal=null, low=`LOW`, medium=null, high=`HIGH`, xhigh=null, max=null | none |
+| Sol | `gpt-5.6-sol` / GPT-5.6 Sol | `openai-responses` | text,image | 0/0/0/0 | 1,050,000/128,000 | off=`none`, minimal=null, low=`low`, medium=`medium`, high=`high`, xhigh=`xhigh`, max=`max` | `{"supportsLongCacheRetention":true}` |
+| Terra | `gpt-5.6-terra` / GPT-5.6 Terra | `openai-responses` | text,image | 0/0/0/0 | 1,050,000/128,000 | off=`none`, minimal=null, low=`low`, medium=`medium`, high=`high`, xhigh=`xhigh`, max=`max` | `{"supportsLongCacheRetention":true}` |
+| Opus | `claude-opus-5` / Claude Opus 5 | `anthropic-messages` | text,image | 0/0/0/0 | 1,000,000/128,000 | off=`off`, minimal=null, low=`low`, medium=`medium`, high=`high`, xhigh=`xhigh`, max=`max` | `{"supportsEagerToolInputStreaming":true,"supportsLongCacheRetention":true}` |
+| Sonnet | `claude-sonnet-5` / Claude Sonnet 5 | `anthropic-messages` | text,image | 0/0/0/0 | 1,000,000/128,000 | off=`off`, minimal=null, low=`low`, medium=`medium`, high=`high`, xhigh=`xhigh`, max=`max` | `{"supportsEagerToolInputStreaming":true,"supportsLongCacheRetention":true}` |
+| Gemini | `gemini-3.1-pro-preview` / Gemini 3.1 Pro Preview | `google-generative-ai` | text,image | 0/0/0/0 | 1,048,576/65,536 | off=null, minimal=null, low=`LOW`, medium=null, high=`HIGH`, xhigh=null, max=null | key absent; Google accepts no compat object |
 
-All records have `reasoning: true`. Provider IDs are `prime-proxy-openai`, `prime-proxy-anthropic`, and `prime-proxy-google`. The Anthropic `anthropic-beta` key is omitted when the configured extended-cache token is empty.
+All records have `reasoning: true`; unknown proxy pricing is deliberately represented by zero costs. Provider IDs are `prime-proxy-openai`, `prime-proxy-anthropic`, and `prime-proxy-google`. Adaptive Anthropic thinking is derived from the required `opus-5`/`sonnet-5` ID tokens, not a compat key. The Anthropic `anthropic-beta` key is omitted when the configured extended-cache token is empty. Gemini profile `off=null` is an unsupported-level sentinel; Prime serializes a reasoning-off request as `LOW`, never as an omitted thinking field.
+
+The three provider fixtures are literal objects with exactly `id`, `name`, `api`, `baseUrl`, `apiKey`, `authHeader`, optional `headers`, and `models`. Their `apiKey` value is the string `PRIME_LLM_KEY`; `authHeader` is `true` in bearer mode and `false` in native mode. OpenAI and Google omit `headers`. Anthropic omits `headers` when `PRIME_ANTHROPIC_EXTENDED_CACHE_BETA` is empty and otherwise emits exactly `{"anthropic-beta":"<validated token>"}`. No fixture contains a resolved credential.
 
 ## Ownership classification
 
-- **Runtime-enforced:** extension discovery, provider/model visibility, package loading/collisions, effective `rlmMaxDepth`, root cwd, child admission and depth rejection. Task 12 exercises the real pinned binary.
-- **Helper-enforced:** argument firewall, worktree/run state, deadlines, retries, cancellation reconciliation, ledger schema, admissions, report quarantine, finding attribution, policy history, and outcome schema. Tasks 5-7 and 10 implement pure modules with injected adapters.
-- **Prompt-only:** no coordinator product edits, novelty/value-hypothesis steps, reviewer independence, role selection, real-source verification, and real-format performance discipline. Task 9 tests exact contract text and Task 12 verifies effective prompt separation, but final compliance is review evidence rather than a false mechanical claim.
+- **Runtime-enforced:** extension discovery, provider/model visibility, package loading/collisions, effective `rlmMaxDepth`, root cwd, child admission and depth rejection. Tasks 15 and 17 exercise the real pinned binary.
+- **Helper-enforced:** argument firewall, worktree/run state, deadlines, retries, cancellation reconciliation, ledger schema, admissions, report quarantine, finding attribution, policy history, and outcome schema. Tasks 5-8 and 11-14 implement pure modules plus the shipped controller adapter that invokes them.
+- **Prompt-only:** no coordinator product edits, novelty/value-hypothesis steps, reviewer independence, role selection, real-source verification, and real-format performance discipline. Task 10 tests exact contract text and Task 17 verifies effective root/child prompt separation, but final compliance is review evidence rather than a false mechanical claim.
 
 ## Accepted layout amendment
 
@@ -56,34 +58,39 @@ This plan is the exact implementation file manifest and supersedes the design do
 | Task | Implementer | Sealed primary | Additional seats |
 |---|---|---|---|
 | 1 | Terra | Opus | Sol |
-| 2 | Sol | Opus | Gemini |
-| 3 | Sol | Opus | Gemini |
-| 4 | Terra | Sol | Opus |
+| 2 | Terra | Sol | Opus, Gemini |
+| 3 | Terra | Sol | Opus, Gemini |
+| 4 | Terra | Sol | Opus, Gemini |
 | 5 | Terra | Sol | Opus, Gemini |
 | 6 | Terra | Sol | Opus, Gemini |
 | 7 | Terra | Sol | Opus, Gemini |
-| 8 | Opus | Sol | Gemini |
+| 8 | Terra | Sol | Opus, Gemini |
 | 9 | Opus | Sol | Gemini |
-| 10 | Terra | Sol | Opus, Gemini |
-| 11 | Terra | Sol | Opus |
+| 10 | Opus | Sol | Gemini |
+| 11 | Terra | Sol | Opus, Gemini |
 | 12 | Terra | Sol | Opus, Gemini |
-| 13 | Sonnet | Sol | Opus, Gemini |
+| 13 | Terra | Sol | Opus, Gemini |
+| 14 | Terra | Sol | Opus, Gemini |
+| 15 | Terra | Sol | Opus, Gemini |
+| 16 | Terra | Sol | Opus, Gemini |
+| 17 | Terra | Sol | Opus, Gemini |
+| 18 | Sonnet | Sol | Opus, Gemini; Gemini owns simplicity verdict |
 
 ## Task 0: Establish the kit-build worktree and ledger
 
 **Depends on:** approved implementation plan.
 
-**Files:** `.superpowers/sdd/2026-08-26-prime-superpowers-implementation-plan/progress.md` only; this path is ignored by `.superpowers/sdd/.gitignore`.
+**Files:** `.superpowers/sdd/.gitignore`, `.superpowers/sdd/2026-08-26-prime-superpowers-implementation-plan/progress.md`.
 
-**Procedure:** Initialize the local repository if needed, commit the approved specs/reviews as the immutable baseline, create an external worktree on `prime/kit-build-<run-id>`, and run all remaining tasks there. Record roots, branch, starting commit, plan SHA-256, acceptance commands, and frozen implementation range. This is orchestration setup, not a product commit.
+**Procedure:** Initialize the local repository if needed, commit the approved specs/reviews as the immutable baseline, create an external worktree on `prime/kit-build-<run-id>`, then create `.superpowers/sdd/.gitignore` with exact content `*` plus newline and the plan-scoped ledger directly. Run all remaining tasks there. Record roots, branch, starting commit, plan SHA-256, acceptance commands, and frozen implementation range. Both paths remain ignored orchestration state and are not committed.
 
-**Acceptance:** `git rev-parse --abbrev-ref HEAD` is neither `main` nor `master`; the ledger roots equal the active worktree; `git status --short` does not show `.superpowers/sdd`; and the recorded plan hash matches `sha256sum`.
+**Acceptance:** `git rev-parse --abbrev-ref HEAD` is neither `main` nor `master`; the ledger roots equal the active worktree; `test "$(cat .superpowers/sdd/.gitignore)" = "*"`; `git status --short` does not show `.superpowers/sdd`; and the recorded plan hash matches `sha256sum`.
 
 ## Task 1: Repository skeleton, gate, and verified Prime toolchain
 
 **Depends on:** Task 0.
 
-**Files:** `.gitignore`, `LICENSE`, `toolchain/package.json`, `toolchain/package-lock.json`, `toolchain/SHA256SUMS`, `scripts/bootstrap-toolchain`, `scripts/gate`, `tests/toolchain.test.mjs`, `tests/test-package.sh`, `tests/fixtures/toolchain/`.
+**Files:** `.gitignore`, `LICENSE`, `toolchain/package.json`, `toolchain/package-lock.json`, `toolchain/SHA256SUMS`, `scripts/bootstrap-toolchain`, `scripts/gate`, `tests/toolchain.test.mjs`, `tests/gate.test.mjs`, `tests/test-package.sh`, `tests/fixtures/toolchain/`, `tests/fixtures/gate/`.
 
 **Red:**
 
@@ -91,18 +98,21 @@ This plan is the exact implementation file manifest and supersedes the design do
 node --test tests/toolchain.test.mjs
 ```
 
-First red exits 1 at named subtest `bootstrap rejects unsupported Node` with `ERR_MODULE_NOT_FOUND`. After an importable fail-closed shell fixture exists, the behavioral red exits 1 with `not ok ... Node 22.7.0 is rejected before npm` and diagnostic `expected E_NODE_VERSION before E_NPM`.
+The absence red runs the named subtest `bootstrap rejects unsupported Node` before `scripts/bootstrap-toolchain` exists and exits 1 with `spawn scripts/bootstrap-toolchain` and `ENOENT`. After a fail-closed shell stub exists, the behavioral red exits 1 at `Node 22.7.0 is rejected before npm` with `expected E_NODE_VERSION before E_NPM`. Independently, `gate detects a syntax error in an existing POSIX shell file` first fails because `scripts/gate` is absent, then because a fail-open stub returns zero instead of reporting `E_SHELL_SYNTAX`.
 
 **Green behavior:**
 
 - Semantically reject Node below 22.8.0 before `npm ci` and before credentials enter the environment.
+- Require npm 10.8.2 through `packageManager: "npm@10.8.2"` and reject a different package-manager identity/version with `E_NPM_VERSION` before installation.
 - `toolchain/package.json` pins the official 0.8.1 main release tarball; the committed lock pins all transitive public and three internal release artifacts.
-- `npm ci --prefix toolchain` is the enforcing install gate. Verify installed package identity, lockfile integrity, and binary output exactly `0.8.1`.
+- Run `npm ci --prefix toolchain` with `PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1` and `PRIME_AGENT_BOOTSTRAP_TOOLS_ON_INSTALL=1`. The bootstrap script independently verifies the installed Python/IPython kernel, `rg`, and `fd` after postinstall because postinstall may report an optional-bootstrap failure without making npm fail.
+- `npm ci --prefix toolchain` is the enforcing install gate. Verify installed package identity, lockfile integrity, binary output exactly `0.8.1`, and executable kernel/tool paths.
 - `toolchain/SHA256SUMS` records all four published SHA-256 values. `bootstrap-toolchain --verify-downloads` is the explicit network-dependent comparison that downloads to a temporary directory, hashes bytes, and deletes them. Offline unit tests validate its mismatch behavior with local fixture tarballs, not self-matching constants.
-- `scripts/gate` is shebang-aware, null-glob safe, and activates suites only after their introducing task.
+- `scripts/gate` is shebang-aware, null-glob safe, and activates suites only after their introducing task. It prints one machine-readable `suite=<name> state=activated|skipped|failed` line per suite.
+- `tests/gate.test.mjs` proves a broken existing POSIX shell is rejected with its path, a post-introduction missing suite fails, a future suite is skipped, unmatched globs never reach an interpreter, and a Node-shebang script is never passed to `bash -n`.
 - Ignore `toolchain/node_modules`, agent runtime state, `.state`, secrets, `.worktrees`, and temporary downloads.
 
-**Acceptance:** `node --test tests/toolchain.test.mjs`; `bash tests/test-package.sh`; `scripts/gate`. Network checksum verification is recorded once during this task and thereafter available through doctor live/provenance mode.
+**Acceptance:** `node --test tests/toolchain.test.mjs tests/gate.test.mjs`; `bash tests/test-package.sh`; `scripts/gate`. Network checksum verification is recorded once during this task and thereafter available through doctor live/provenance mode.
 
 ## Task 2: Pure environment and frozen provider configuration
 
@@ -124,7 +134,8 @@ First red is exact module absence. Behavioral red is named `derives three native
 - Protect kit controls and redact secrets from errors and debug objects.
 - Normalize one proxy root into OpenAI `/v1`, Anthropic bare root, and Google `/v1beta`; complete protocol-specific overrides remain unchanged.
 - Validate bearer/native auth. Register unique providers with `PRIME_LLM_KEY`; never override built-ins or read provider-specific operator credentials.
-- Export exactly the five frozen model records above. Alias overrides must retain the required family token and may change only transport ID.
+- Provider declarations set `apiKey: "PRIME_LLM_KEY"` as the environment-variable name, never the resolved secret. Export exactly the five frozen model records above. Alias overrides must retain the required family token and may change only transport ID.
+- Each fixture record is a literal object with exactly `id`, `name`, `api`, `provider`, `baseUrl`, `reasoning`, `input`, `cost`, `contextWindow`, `maxTokens`, `thinkingLevelMap`, and, where allowed, `compat`. The three fixture roots are `https://proxy.example/v1`, `https://proxy.example`, and `https://proxy.example/v1beta`; costs are `{input:0,output:0,cacheRead:0,cacheWrite:0}`; `compat` equals the literal JSON in the table and is absent for Gemini.
 - Omit `anthropic-beta` entirely for an empty cache-beta token. Otherwise include only the configured extended-cache token.
 
 **Acceptance:** table tests cover malicious env syntax, precedence, empty/complete overrides, trailing slashes, auth, all thinking levels, aliases, redaction, empty header omission, every literal profile field, and `scripts/gate`.
@@ -133,7 +144,7 @@ First red is exact module absence. Behavioral red is named `derives three native
 
 **Depends on:** Task 2.
 
-**Files:** `agent-home/extensions/prime-superpowers.js`, `agent-home/settings.json`, `agent-home/AGENTS.md`, `agent-home/prompts/coordinator.md`, `agent-home/prompts/child.md`, `tests/extension.test.mjs`, `tests/fixtures/extension-api.mjs`, `tests/test-package.sh`.
+**Files:** `agent-home/extensions/prime-superpowers.js`, `agent-home/settings.json`, `agent-home/AGENTS.md`, `agent-home/prompts/coordinator.md`, `agent-home/prompts/child.md`, `agent-home/resources.lock.json`, `tests/extension.test.mjs`, `tests/fixtures/extension-api.mjs`, `tests/test-package.sh`.
 
 **Red:**
 
@@ -148,11 +159,13 @@ First red is exact module absence. Behavioral red is `before_agent_start selects
 - Load only from `.js`; import `lib/config.mjs` by relative ESM URL or `pathToFileURL`, including a Windows-path fixture.
 - Register providers through Prime's extension API without overriding built-ins.
 - Use `before_agent_start`, inspect `systemPromptOptions.rlmDepth`, and return `systemPrompt` idempotently on every turn. Depth zero receives the coordinator contract; depth greater than zero receives one universal role-neutral child tool contract.
+- Register an `input` handler that consumes every `/rlm-max-depth` form with `{action:"handled"}` and a stable `E_DEPTH_LOCKED` explanation. This prevents persisted or `--global` depth mutation through the supported interactive command.
 - Worker versus reviewer policy is carried in each validated dispatch prompt, never inferred from depth or child name.
 - Contracts name only `ipython`, `Path`, `bash`, `rlm`, `rlm.find_models`, and `agent_message.send(receiver_role="parent")`; removed `read`/`write`/`grep`/`ls` tool mappings are forbidden. Children must `os.chdir(worktree_root)`.
-- Settings enforce `rlmMaxDepth: 1` and pin `git:github.com/obra/superpowers@v6.3.0` with `extensions: []`.
+- The committed `agent-home/` is an immutable template. Settings enforce `rlmMaxDepth: 1` and pin `git:github.com/obra/superpowers@v6.3.0` with `extensions: []`; Task 8 copies the complete template into ignored per-run state before startup so Prime never writes tracked settings.
+- `resources.lock.json` lists every skill path present now and every exact path introduced by Tasks 9 and 10. Tests reject an AGENTS/prompt skill reference absent from both disk and this introduced-later manifest.
 
-**Acceptance:** provider registration payloads, repeated-turn prompt replacement, depth split, package filter, no built-in collisions, positive/negative tool vocabulary, cross-platform import resolution, and `scripts/gate`.
+**Acceptance:** provider registration payloads, repeated-turn prompt replacement, depth split, `/rlm-max-depth` interception, package filter, no built-in collisions, positive/negative tool vocabulary, introduced-later resource validation, cross-platform import resolution, and `scripts/gate`.
 
 ## Task 4: Launcher shell, invariant environment, and process forwarding
 
@@ -172,8 +185,9 @@ First red is exact module absence. Behavioral red is `preflight precedes credent
 
 - Provide a POSIX entry point and a `prime.cmd` WSL forwarder with `%*`, clear missing-WSL diagnostic, and nonzero exit; validate its command text and argument forwarding fixture.
 - Resolve kit paths without changing target state. Invoke Node/toolchain preflight before credential loading.
-- Spawn the absolute verified binary with invariant `PRIME_AGENT_CODING_AGENT_DIR`, `PI_CACHE_RETENTION=long`, telemetry opt-out, exact Sol selector, and inherited target worktree cwd supplied by later resolver code.
+- Spawn the absolute verified binary with invariant `PRIME_AGENT_CODING_AGENT_DIR`, `PI_CACHE_RETENTION=long`, `PRIME_AGENT_TELEMETRY=off`, exact Sol selector, and inherited target worktree cwd supplied by later resolver code.
 - Forward child exit status and termination signals. Never log secrets.
+- Until Task 8 supplies the composed launcher controller, both entry points fail closed with `E_NOT_COMPOSED`; they must not pass unfiltered arguments to Prime.
 
 **Acceptance:** ordering, environment, selector, exit/signal forwarding, redaction, batch wrapper assertions, and `scripts/gate`.
 
@@ -225,31 +239,55 @@ First red is exact module absence. Behavioral red is `creates run branch before 
 
 **Acceptance:** temporary real git repositories cover external/in-repo paths, dirty targets, branch collisions, symlinks, excludes, unchanged tracked tree, and `scripts/gate`.
 
-## Task 7: Persistent run registry and lifecycle commands
+## Task 7: Persistent run registry
 
-**Depends on:** Tasks 4 and 6.
+**Depends on:** Task 6.
 
-**Files:** `lib/run-registry.mjs`, `lib/launcher.mjs`, `tests/run-registry.test.mjs`, `tests/launcher.test.mjs`, `tests/fixtures/bin/fake-prime-session`, `tests/test-package.sh`.
+**Files:** `lib/run-registry.mjs`, `tests/run-registry.test.mjs`, `tests/fixtures/run-registry/`, `tests/test-package.sh`.
 
 **Red:**
 
 ```bash
-node --test tests/run-registry.test.mjs tests/launcher.test.mjs
+node --test tests/run-registry.test.mjs
 ```
 
-First red is exact module absence. Behavioral red is `second live coordinator is refused` with `expected E_RUN_ACTIVE, got second spawn`.
+The import red is `ERR_MODULE_NOT_FOUND` for `lib/run-registry.mjs`. The fail-closed stub red is `second live coordinator is refused` with `expected E_RUN_ACTIVE, got reservation granted`.
 
 **Green behavior:**
 
-- Implement `run`, `attach`, `status`, and `stop` over one atomic clone-local record containing agent home, target, worktree, branch, parent session identity, PID/start identity, timestamps, and state.
-- Preserve the exact parent session across TUI detach. Attach/status/stop may address only the recorded parent.
-- Refuse a second live or retained coordinator. Stale/ambiguous takeover is interactive only; unrecoverable parent loss transitions to `orphaned` without spawning a duplicate.
+- Export `reserveRun`, `recordParentSession`, `readRun`, `transitionRun`, and `releaseRun` over one atomic clone-local record containing runtime agent home, target, worktree, branch, parent session identity, PID/start identity, timestamps, and state.
+- Preserve the exact parent session across TUI detach. State queries and mutations may address only the recorded parent.
+- Refuse a second live or retained coordinator. Stale/ambiguous takeover requires an explicit caller authorization; unrecoverable parent loss transitions to `orphaned` without granting a duplicate reservation.
 - Use advisory clone locking, atomic write/rename/fsync, schema versioning, corruption diagnostics, and injected clock/process adapters.
-- Compose preflight, firewall, worktree, registry, and process modules without reopening their behavior.
 
-**Acceptance:** live/detached/stale/orphaned states, PID reuse, lock contention, corrupt/partial records, exact session addressing, non-TTY takeover rejection, signal/exit propagation, and `scripts/gate`.
+**Acceptance:** live/detached/stale/orphaned states, PID reuse, lock contention, corrupt/partial records, exact session addressing, unauthorized takeover rejection, and `scripts/gate`.
 
-## Task 8: Pinned Superpowers vendoring and collision-safe resources
+## Task 8: Composed launcher controller and immutable runtime agent home
+
+**Depends on:** Tasks 3-7.
+
+**Files:** `lib/launcher.mjs`, `scripts/install-superpowers-package`, `tests/launcher.test.mjs`, `tests/fixtures/bin/fake-prime-session`, `tests/fixtures/launcher/`, `tests/test-package.sh`.
+
+**Red:**
+
+```bash
+node --test tests/launcher.test.mjs
+```
+
+The import red is `ERR_MODULE_NOT_FOUND` for `lib/launcher.mjs`. The fail-closed stub red is `run composes firewall worktree registry and process in order` with `expected firewall,worktree,runtime-home,package,registry,spawn; got E_NOT_COMPOSED`.
+
+**Green behavior:**
+
+- Export `run`, `attach`, `status`, and `stop` and compose the previously tested process, firewall, worktree, and registry interfaces without duplicating their policy.
+- For each run, copy the committed `agent-home/` template byte-for-byte into ignored `.state/runs/<run-id>/agent-home`, set `PRIME_AGENT_CODING_AGENT_DIR` to that copy, and prove the tracked template remains byte-identical after a simulated session write.
+- Before spawn, install/resolve the pinned Superpowers package into the runtime agent home and verify the minimum effective skill set `brainstorming`, `verification-before-completion`, and `requesting-code-review`. Missing, offline, or silently skipped resolution fails with `E_PACKAGE_UNRESOLVED`.
+- Reject any runtime agent-home copy whose effective settings do not contain `rlmMaxDepth: 1`, the pinned package, and `extensions: []`; reject a retained session containing an effective depth override other than one.
+- Preserve the exact parent session for attach/status/stop, refuse duplicate live coordinators, and propagate child exit status and signals.
+- Replace Task 4's `E_NOT_COMPOSED` entry-point branch with calls to this controller. Wrapper-owned `run`, `attach`, `status`, and `stop` are consumed before Prime sees argv.
+
+**Acceptance:** composition order, immutable template, per-run copy, fail-closed package absence, effective-depth refusal, exact session addressing, duplicate refusal, signal/exit propagation, and `scripts/gate`.
+
+## Task 9: Pinned Superpowers vendoring and collision-safe resources
 
 **Depends on:** Task 3.
 
@@ -274,11 +312,11 @@ First red is exact missing directory. Behavioral red is `all overriding-skill re
 
 **Acceptance:** `node --test tests/skills-vendor.test.mjs`; direct fixture invocations of all three helpers; `scripts/gate`.
 
-## Task 9: Prime-native SDD, novelty, and model-routing policy
+## Task 10: Prime-native SDD, novelty, and model-routing policy
 
-**Depends on:** Tasks 3 and 8.
+**Depends on:** Tasks 3 and 9.
 
-**Files:** adapted `agent-home/skills/using-superpowers/SKILL.md`, adapted `agent-home/skills/subagent-driven-development/SKILL.md`, `agent-home/skills/prime-rlm-dispatch/SKILL.md`, `agent-home/skills/model-policy/SKILL.md`, their local prompt templates, `tests/workflow-contract.test.mjs`, `tests/test-package.sh`.
+**Files:** `agent-home/skills/using-superpowers/SKILL.md`, `agent-home/skills/subagent-driven-development/SKILL.md`, `agent-home/skills/subagent-driven-development/implementer-prompt.md`, `agent-home/skills/subagent-driven-development/task-reviewer-prompt.md`, `agent-home/skills/subagent-driven-development/re-review-prompt.md`, `agent-home/skills/subagent-driven-development/final-reviewer-prompt.md`, `agent-home/skills/prime-rlm-dispatch/SKILL.md`, `agent-home/skills/prime-rlm-dispatch/worker-prompt.md`, `agent-home/skills/prime-rlm-dispatch/reviewer-prompt.md`, `agent-home/skills/model-policy/SKILL.md`, `agent-home/skills/model-policy/novelty-prompt.md`, `agent-home/resources.lock.json`, `tests/workflow-contract.test.mjs`, `tests/test-package.sh`.
 
 **Red:**
 
@@ -295,123 +333,140 @@ First red is exact skill absence. Behavioral red is `dispatch contract requires 
 - Require one exact `rlm.find_models` resolution pass and full provider/model selector dispatches. Every prompt includes a validated role marker, worktree root, immutable input/range, mutation policy, output report path, deadline, and parent notification.
 - Encode the user’s incremental SDD/TDD principles, no coordinator product edits, one item at a time, fresh review loops, real-source verification, and format-identical performance evidence.
 - State which obligations are prompt-only. Do not claim that depth distinguishes workers from reviewers or that RLM returns child results.
+- Consume every introduced-later resource entry from `agent-home/resources.lock.json`; after this task the manifest contains no unresolved skill or prompt path.
 
 **Acceptance:** exact positive and forbidden token sets, role/model/effort matrix, no Gemini implementation path, report/deadline/cwd contract, upstream-link integrity, and `scripts/gate`.
 
-## Task 10: Workflow state, ledger, and policy-history enforcement
+## Task 11: Child lifecycle state engine
 
-**Depends on:** Tasks 7 and 9.
+**Depends on:** Tasks 7 and 10.
 
-**Files:** `lib/workflow-state.mjs`, `lib/ledger.mjs`, `lib/policy-history.mjs`, `tests/workflow-state.test.mjs`, `tests/ledger.test.mjs`, `tests/policy-history.test.mjs`, `tests/test-package.sh`.
+**Files:** `lib/workflow-state.mjs`, `tests/workflow-state.test.mjs`, `tests/test-package.sh`.
 
-**Red:**
+**Red:** `node --test tests/workflow-state.test.mjs` first fails with `ERR_MODULE_NOT_FOUND`. With the fail-closed stub, `timed-out attempt cannot be retried before cancellation tombstone` fails with `expected E_CLEANUP_UNCONFIRMED, got retry admitted`.
 
-```bash
-node --test tests/workflow-state.test.mjs tests/ledger.test.mjs tests/policy-history.test.mjs
-```
+**Green behavior:** Export pure, schema-versioned transitions with injected clock/RLM adapters for admitted, queued, running, reported, completed, failed, timed-out, cleanup-failed, retrying, and quarantined-late-report states. Persist `admitted_at`, `started_at`, `last_progress_at`, `deadline_at`, unique attempt ID/name, selector, report path, and parent session; reconstruct deadlines after attach without resetting clocks. Require confirmed `rlm.delete_subagent` tombstones before one fresh-name retry, reject duplicate live attempts, and quarantine late reports.
 
-First red is exact module absence. Behavioral red is `timed-out attempt cannot be retried before cancellation tombstone` with `expected E_CLEANUP_UNCONFIRMED, got retry admitted`.
+**Acceptance:** deterministic fake-clock/RLM tests cover every transition, restart clocks, deadline expiry, cancellation uncertainty, retry naming, duplicate attempts, late reports, and `scripts/gate`.
 
-**Green behavior:**
+## Task 12: Auditable SDD ledger
 
-- Implement pure, schema-versioned transitions with injected clock and RLM adapters for admitted, queued, running, reported, completed, failed, timed-out, cleanup-failed, retrying, and quarantined-late-report states.
-- Persist `admitted_at`, `started_at`, `last_progress_at`, `deadline_at`, unique attempt ID/name, model selector, report path, and parent session. Reconstruct deadlines after attach without resetting clocks.
-- Require `rlm.delete_subagent` confirmation/tombstone before one fresh-name retry; reject duplicate live attempts; quarantine late reports. Cancellation uncertainty becomes `cleanup-failed`.
-- Enforce discovery/spec cap 20, per-task cap 12, run cap 80, five review rounds, cannot-verify gate, deferred-Minor handoff, sealed primary findings, unique later-seat attribution, and independent cross-family severity-downgrade concurrence.
-- Append redacted records to ignored clone-local `.state/policy-history.jsonl`; use atomic append/locking. Provide explicit export/import so an operator can preserve history across clones.
-- Define the first-production outcome schema: frozen criteria results, rounds, interventions, elapsed time, admissions/available usage by seat, unique accepted findings and effects, and simplicity verdict.
+**Depends on:** Task 11.
 
-**Acceptance:** deterministic fake-clock and fake-RLM tests cover all transitions, restart clocks, caps, attribution, concurrence, corruption, concurrent append, secret rejection, outcome missing-field gate, and `scripts/gate`.
+**Files:** `lib/ledger.mjs`, `tests/ledger.test.mjs`, `tests/fixtures/ledger/`, `tests/test-package.sh`.
 
-## Task 11: Static doctor and credential-free diagnostics
+**Red:** `node --test tests/ledger.test.mjs` first fails with `ERR_MODULE_NOT_FOUND`. With the fail-closed stub, `ledger rejects incomplete red green evidence` fails with `expected E_EVIDENCE_INCOMPLETE for missing post_tree_hash, got append accepted`.
 
-**Depends on:** Tasks 1-10.
+**Green behavior:** Export schema-versioned create/read/append functions for plan identity, immutable `BASE..HEAD` ranges, command/cwd/timestamps/status/subtest/failure/artifact fields, pre/post commit and tree hashes, review rounds, findings, resolutions, rulings, and outcomes. Use locking plus atomic write/rename/fsync; reject mutation of frozen plan hash or acceptance commands, corrupt history, non-monotonic rounds, mutable review ranges, and secrets.
 
-**Files:** `scripts/doctor`, `lib/doctor.mjs`, `tests/doctor.test.mjs`, `tests/fixtures/doctor/`, `tests/test-package.sh`.
+**Acceptance:** complete/incomplete evidence, plan-hash drift, immutable ranges, concurrent append, crash recovery, corruption, redaction, and `scripts/gate`.
 
-**Red:**
+## Task 13: Review governance and policy history
 
-```bash
-node --test tests/doctor.test.mjs
-```
+**Depends on:** Task 12.
 
-First red is exact module absence. Behavioral red is `static doctor passes structural checks without proxy secrets` with `expected exit 0, got E_MISSING_KEY`.
+**Files:** `lib/policy-history.mjs`, `tests/policy-history.test.mjs`, `tests/fixtures/policy-history/`, `tests/test-package.sh`.
 
-**Green behavior:**
+**Red:** `node --test tests/policy-history.test.mjs` first fails with `ERR_MODULE_NOT_FOUND`. With the fail-closed stub, `later-seat unique finding is not credited to sealed primary` fails with `expected seat=gemini, got seat=sol`.
 
-- Static mode verifies Node, toolchain identity, extension filename/settings, skills/provenance, selectors, URL roots, auth mode, protected variables, executable bits, `rg`, `fd`, and Python/IPython prerequisites.
-- Missing proxy credentials in static mode are a notice, not failure. `--live` requires credentials.
-- `--verify-downloads` invokes Task 1’s network checksum path explicitly.
-- Diagnostics distinguish prerequisite, unreachable, unauthorized, path/dialect mismatch, missing model, unsupported effort, and corrupt state without exposing key material.
+**Green behavior:** Enforce discovery/spec cap 20, per-task cap 12, run cap 80, five review rounds, cannot-verify gate, deferred-Minor handoff, sealed-primary findings, unique later-seat attribution, and independent cross-family severity-downgrade concurrence. Append redacted, locked records to ignored `.state/policy-history.jsonl`; provide explicit export/import. Validate the first-production outcome schema: frozen criteria, rounds, interventions, elapsed time, admissions/available usage by seat, unique accepted findings/effects, and Gemini simplicity verdict.
 
-**Acceptance:** secret-free structural fixture exits zero; structural defects fail with stable codes; live-without-key fails; redaction snapshots pass; `scripts/doctor`; `scripts/gate`.
+**Acceptance:** caps, attribution, concurrence, cannot-verify, deferred Minors, missing outcome fields, concurrent append, import/export, secret rejection, and `scripts/gate`.
 
-## Task 12: Packaged Prime runtime integration and native-wire spike
+## Task 14: Shipped workflow controller adapter
 
-**Depends on:** Tasks 1-11.
+**Depends on:** Tasks 8 and 10-13.
 
-**Files:** `tests/prime-runtime.test.mjs`, `tests/wire-probe.test.mjs`, `tests/fixtures/mock-proxy.mjs`, `tests/fixtures/runtime-target/`, `scripts/install-superpowers-package`, `tests/test-package.sh`.
+**Files:** `lib/workflow-controller.mjs`, `scripts/workflow-controller`, `agent-home/skills/prime-rlm-dispatch/SKILL.md`, `agent-home/skills/subagent-driven-development/SKILL.md`, `tests/workflow-controller.test.mjs`, `tests/fixtures/workflow-controller/`, `tests/test-package.sh`.
 
-**Red:**
-
-```bash
-node --test tests/prime-runtime.test.mjs tests/wire-probe.test.mjs
-```
-
-The installed binary already exists, so the first required red is behavioral: named subtest `real Prime lists prime-proxy-openai model` fails with `selector prime-proxy-openai/gpt-5.6-sol not found`. No missing-module red counts for this task.
+**Red:** `node --test tests/workflow-controller.test.mjs` first fails with `ERR_MODULE_NOT_FOUND`. With the fail-closed stub, `dispatch is denied when admission ledger and lifecycle checks are bypassed` fails with `expected E_CONTROLLER_REQUIRED, got child admitted`.
 
 **Green behavior:**
 
-- Install the pinned Superpowers package into an isolated temporary agent home through the real Prime package mechanism; fail closed with a clear offline/clone diagnostic.
-- Run the checksum/lock-verified Prime 0.8.1 binary headlessly against a temporary real git target and the kit agent home. No fake Prime executable is allowed.
-- Assert effective extension discovery, all three provider/model selectors, intended skill collision winners/losers, filtered package extension, `rlmMaxDepth: 1` despite an operator-home value of 2, root worktree cwd, universal child prompt, and grandchild rejection.
-- Bind protocol mock servers to `127.0.0.1:0`. Capture real serializer requests for OpenAI Responses `/v1/responses`, Anthropic `/v1/messages`, and Google `/v1beta/models/...`.
-- Assert bearer/native auth, text/image declarations, exact effort fields, OpenAI 24-hour retention under `PI_CACHE_RETENTION=long`, Anthropic `cache_control` `ttl: 1h`, optional extended-cache-only beta header, eager tool-input shape, and Gemini LOW/HIGH.
-- Use only sentinel credentials and local loopback. Record the risky-unknown spike result and any plan amendment it forces.
+- Make this adapter the only supported coordinator path for resolve, admit, poll, progress, cancel, retry, receive-report, open-review, record-finding, rule, and close-review operations.
+- Invoke the exact Task 11-13 module exports and persist every transition to the Task 12 ledger before acknowledging success. No duplicate policy arithmetic is allowed in prompts or the launcher.
+- Emit Prime-ready Python snippets for `rlm.find_models`, `rlm.run`, `rlm.list_subagents`, `rlm.delete_subagent`, and `agent_message.send`; require callers to return the observed result for reconciliation.
+- Update both skills to invoke `scripts/workflow-controller` and to reject direct unmanaged RLM dispatch. Tests prove lifecycle/cap/deadline/review gates flow through the shipped adapter.
 
-**Acceptance:** `node --test tests/prime-runtime.test.mjs tests/wire-probe.test.mjs`; `scripts/doctor`; `scripts/gate`. The runtime integration suite may be a separately labeled network-bootstrap CI job, but once dependencies/package cache are present its provider calls remain local and secret-free.
+**Acceptance:** end-to-end fake-RLM scenarios cover success, timeout/cancel/retry, late report, cap stop, review loop, concurrence, and outcome closure; direct bypass is rejected; `scripts/gate`.
 
-## Task 13: Operator documentation, CI, and outcome evidence
+## Task 15: Static doctor and real packaged-runtime loading
 
-**Depends on:** Tasks 1-12.
+**Depends on:** Tasks 1-14.
 
-**Files:** `README.md`, `.env.example`, `AGENTS.md`, `.github/workflows/ci.yml`, `UPSTREAM.md`, `docs/reviews/README.md`, `docs/reviews/outcome-kit-build.md`, `.state/policy-history.jsonl` during the run only, and status lines in the design/plan.
+**Files:** `scripts/doctor`, `lib/doctor.mjs`, `tests/doctor.test.mjs`, `tests/prime-runtime.test.mjs`, `tests/fixtures/doctor/`, `tests/fixtures/runtime-target/`, `tests/test-package.sh`.
 
-**Red:**
-
-```bash
-bash tests/test-package.sh
-```
-
-The exact failing assertion is `not ok required operator document README.md` followed by analogous named missing-deliverable checks. A generic shell or glob failure does not count.
+**Red:** `node --test tests/doctor.test.mjs tests/prime-runtime.test.mjs`. The doctor import first fails with `ERR_MODULE_NOT_FOUND`; its stub fails `static doctor passes structural checks without proxy secrets` with `expected exit 0, got E_MISSING_KEY`. The real-runtime behavioral red is `real Prime lists prime-proxy-openai model` with `selector prime-proxy-openai/gpt-5.6-sol not found`.
 
 **Green behavior:**
 
-- Document clone, Node >=22.8.0, two-variable quick start, toolchain install, target/worktree behavior, `run/attach/status/stop`, safe flags, unsafe escape hatch, model matrix, native protocol roots, auth overrides, Anthropic 1-hour caching, static/live doctor, package bootstrap, and recovery.
-- Explain that Prime-RL weight/policy training is not used; this is an orchestration policy over Prime Agent RLM children.
-- State POSIX/macOS/Linux/WSL support and the Windows-to-WSL wrapper.
-- CI pins Node 22.8.0 and a current supported LTS. Separate offline syntax/unit/package jobs from the network toolchain/package bootstrap plus real-runtime job. No real proxy secret is required.
-- Produce `outcome-kit-build.md` with frozen acceptance pass/fail, per-task rounds, interventions, elapsed time, admissions/available usage by seat, unique material findings, and a simplicity reviewer’s explicit verdict on whether the ceremony produced value.
-- Append the kit-build policy record as run one, export a redacted copy into the outcome document, and leave `.state/` ignored.
+- Static doctor verifies Node/npm, toolchain identity, executable kernel/`rg`/`fd`, extension discovery filename, immutable template, runtime-copy settings, provider roots/auth/model selectors, skills/provenance/minimum package resources, protected variables, and executable bits. Missing proxy secrets are notices; `--live` requires them.
+- `--verify-downloads` invokes Task 1's network checksum path. Diagnostics distinguish prerequisite, unresolved package, unauthorized, path/dialect mismatch, missing model, unsupported effort, effective-depth override, tracked-template drift, and corrupt state without exposing keys.
+- In a temporary git target, run the absolute checksum/lock-verified Prime 0.8.1 binary with sentinel environment and a per-run agent-home copy. Exact command: `env PRIME_AGENT_CODING_AGENT_DIR="$RUN_HOME" PRIME_AGENT_TELEMETRY=off PI_CACHE_RETENTION=long "$PRIME_BIN" model list --json`.
+- Require exit 0 within 60 seconds; save stdout/stderr and effective resource inventory under `tests/.artifacts/prime-runtime/<case>/`. Assert all five selectors, package minimum skills, local override winners, filtered package extensions, root worktree cwd, and tracked template byte identity. Remove the package cache and deny network in the negative case; require `E_PACKAGE_UNRESOLVED`, not a silent reduced session.
 
-**Acceptance:**
+**Acceptance:** `node --test tests/doctor.test.mjs tests/prime-runtime.test.mjs`; `scripts/doctor`; `scripts/gate`.
 
-```bash
-scripts/gate
-scripts/doctor
-git diff --check
-```
+## Task 16: Native provider wire probes
 
-Then dispatch one whole-branch Sol/Opus/Gemini council over the initial implementation range. This is the only final council for Task 13. Apply fixes through fresh worker tasks, rerun all gates, and repeat fresh reviews until zero Blocker/Major or the five-round operator stop.
+**Depends on:** Task 15.
+
+**Files:** `tests/wire-probe.test.mjs`, `tests/fixtures/mock-proxy.mjs`, `tests/fixtures/wire-responses/`, `tests/test-package.sh`.
+
+**Red:** `node --test tests/wire-probe.test.mjs` first fails at `Sol uses OpenAI Responses native path` with `expected POST /v1/responses, got no request`. The fixture must already start and emit a valid terminating response, so server/bootstrap errors do not count.
+
+**Green behavior:**
+
+- Bind scripted loopback servers to `127.0.0.1:0`, use sentinel keys only, and invoke the real Prime binary in print mode once per dialect with a 60-second timeout. Each server records method, path, redacted headers, body, response sequence, exit status, and stdout/stderr in `tests/.artifacts/wire/<dialect>/transcript.json`.
+- Serve valid terminating streams for OpenAI Responses, Anthropic Messages, and Google Generative AI. Assert `/v1/responses`, `/v1/messages`, and `/v1beta/models/...`; bearer/native auth; exact effort fields; OpenAI 24-hour retention; Anthropic `cache_control` `ttl:"1h"`, optional extended-cache-only beta header, and eager tool-input shape; Gemini LOW/HIGH including reasoning-off serialized as LOW.
+- Static config inspection is forbidden as a substitute for captured requests. Any wire mismatch is a recorded risky-unknown failure requiring a plan amendment before proceeding.
+
+**Acceptance:** `node --test tests/wire-probe.test.mjs`; inspect the three transcript artifacts; `scripts/gate`.
+
+## Task 17: Real RLM child and depth lifecycle spike
+
+**Depends on:** Tasks 14-16.
+
+**Files:** `tests/rlm-runtime.test.mjs`, `tests/fixtures/rlm-scripted-proxy.mjs`, `tests/fixtures/rlm-responses/`, `tests/test-package.sh`.
+
+**Red:** `node --test tests/rlm-runtime.test.mjs` starts the real installed kernel and scripted proxy, then fails at `child receives universal prompt and inherited worktree cwd` with `expected CHILD_CONTRACT and <worktree>, got no child report`. Missing Python/IPython/`rg`/`fd` is a Task 1 regression, not a skip.
+
+**Green behavior:**
+
+- Start a temporary real git worktree, per-run agent home, and state/ledger directory. Launch the real Prime binary with `PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1` already verified by Task 1 and a 120-second scenario deadline.
+- The scripted OpenAI Responses server emits a coordinator `ipython` tool call that invokes the shipped workflow controller and `rlm.run`; it then serves the child request, whose tool call writes a report containing cwd and prompt markers and sends the parent notification. A final coordinator response terminates the run.
+- Save every HTTP request/response frame, kernel event, controller transition, child registry snapshot, report, ledger entry, stdout/stderr, and exit status under `tests/.artifacts/rlm/<case>/`.
+- Assert real child admission, universal child contract, inherited worktree cwd, disk report plus parent notification, bounded reconciliation, and effective depth source/value one. A second scripted case makes the child attempt `rlm.run`; require the exact `RLM recursion depth limit reached` failure, no grandchild admission, and a completed parent reconciliation. A retained-session fixture with depth two must fail closed before dispatch.
+
+**Acceptance:** `node --test tests/rlm-runtime.test.mjs`; inspect both immutable transcripts; `scripts/gate`.
+
+## Task 18: Operator documentation, CI, and outcome evidence
+
+**Depends on:** Tasks 1-17.
+
+**Files:** `README.md`, `.env.example`, `AGENTS.md`, `.github/workflows/ci.yml`, `UPSTREAM.md`, `docs/reviews/README.md`, `docs/reviews/outcome-kit-build.md`, `tests/test-package.sh`, `.state/policy-history.jsonl` during the run only.
+
+**Red:** Add TAP assertions to `tests/test-package.sh` first, then run it. The exact first failure is `not ok required operator document README.md`; analogous named missing-deliverable failures follow. Generic shell/glob failures do not count.
+
+**Green behavior:**
+
+- Document clone, Node 22.8.0, npm 10.8.2, two-variable quick start, toolchain/package install, target/worktree behavior, `run/attach/status/stop`, safe flags, unsafe escape hatch, model matrix, protocol roots, auth modes, Anthropic one-hour cache, doctor modes, and recovery.
+- Explain that Prime-RL weight/policy training is not used; this is an orchestration policy over Prime Agent RLM children. State POSIX/macOS/Linux/WSL support and the Windows-to-WSL wrapper.
+- CI pins Node 22.8.0 and current supported LTS. Separate offline syntax/unit/package jobs, network bootstrap, real packaged-runtime loading, three local wire probes, and the RLM child spike. No real proxy secret is required.
+- Produce `outcome-kit-build.md` with frozen acceptance results, per-task rounds, interventions, elapsed time, admissions/available usage by seat, unique material findings, outcome effects, and Gemini's explicit simplicity verdict. Append run one to ignored policy history and export a redacted copy into the outcome document.
+
+**Acceptance:** `scripts/gate`; `scripts/doctor`; `git diff --check`. Dispatch one whole-branch Sol/Opus/Gemini council over the immutable implementation range; apply fixes through fresh worker tasks and repeat until zero Blocker/Major or the five-round stop.
+
+After that council alone reaches zero Blocker/Major, make a separate orchestration-only commit changing only the status line in `docs/specs/2026-08-26-prime-superpowers-design.md` and this plan. Record approved and post-status SHA-256 values plus the one-line diff in the ledger. This commit is outside the frozen implementation review range and does not retroactively change the approved plan identity.
 
 ## Round 1 resolution record
 
 - **Broken common gates:** replaced with one stage-aware, shebang-aware `scripts/gate`; removed undefined npm test script.
-- **Fixture-only integration:** added Task 12 using the real pinned binary, real package mechanism, real temporary git repo, real extension loader, and native serializers against loopback mocks.
+- **Fixture-only integration:** Tasks 15-17 use the real pinned binary, real package mechanism, real temporary git worktree, real extension loader, native serializers against loopback mocks, and a real RLM child/kernel path.
 - **Invalid helper command:** replaced `sdd-workspace --help` with exact upstream argument forms and real git fixtures.
-- **Oversized tasks:** split launcher process, firewall, worktree, registry, vendoring, policy, workflow state, doctor, and runtime integration.
-- **Lifecycle ownership:** frozen into pure helper modules with injected clock/RLM adapters; prompt-only obligations are labeled.
+- **Oversized tasks:** split launcher process, firewall, worktree, registry, composition, vendoring, policy, lifecycle, ledger, governance, controller wiring, static runtime, native wires, and RLM child integration.
+- **Lifecycle ownership:** frozen into pure helper modules with injected clock/RLM adapters and wired through the shipped `workflow-controller`; prompt-only obligations are labeled.
 - **Role selection:** depth selects root versus universal child only; each dispatch prompt carries validated worker/reviewer role policy.
 - **Model metadata:** frozen in a literal five-row fixture sourced from Prime 0.8.1.
-- **Missing surfaces:** assigned unsafe args, `.git/info/exclude`, `prime.cmd`, Node preflight wiring, package install, policy history, and outcome evaluation.
+- **Missing surfaces:** assigned unsafe args, `.git/info/exclude`, `prime.cmd`, Node/npm preflight wiring, kernel/tool bootstrap, fail-closed package install, immutable runtime agent homes, policy history, and outcome evaluation.
 - **Portability/minors:** harmonized `provider-config.test.mjs`, ephemeral loopback ports, credential-free static doctor, ESM file URL handling, script modes, tool prerequisites, explicit dependencies, and one nonduplicated final council.
