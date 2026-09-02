@@ -105,3 +105,31 @@ the design, so the requirement was removed. It would have produced a green test
 against a mock and a false guarantee in production. Any remaining requirement
 whose oracle is satisfiable only by a mock should be treated the same way at
 implementation time.
+
+## Environment blocker CLOSED — real binary is reachable
+
+Earlier rounds deferred every runtime proof (Tasks 15-17) on the belief that the
+pinned binary could not run in a sandbox. Both halves of that belief were wrong,
+and the correction is recorded here because it invalidates a deferral that had
+been treated as structural.
+
+1. **Node floor.** Assumed unfixable. Node 22.20.0 plus npm 10.8.2 are now
+   installed at `/home/user/workspace/.tools/node22/bin`, satisfying the
+   `>=22.8.0` floor.
+2. **Artifact reachability.** I concluded the release was unreachable from an npm
+   registry 404 for `@earendil-works/pi-coding-agent@0.8.1`. That was the wrong
+   lookup: the package is published as GitHub release assets under the name
+   `prime-agent`, and the `@earendil-works/pi-*` names are internal deps. The
+   404 was real but meaningless.
+
+Verified end to end: four published SHA-256 values match recomputed bytes,
+install succeeds, and `--version` prints exactly `0.8.1`. `model list` with an
+isolated `PRIME_AGENT_CODING_AGENT_DIR` and `NO_COLOR=1` runs clean and, with no
+generated profile, prints `No models available` — so Task 15 must assert against
+a home where the kit has generated `models.json`, not an empty one.
+
+**Consequence:** Tasks 15-17 are no longer deferred and must produce real runtime
+evidence in this environment. Any finding in this register whose closing evidence
+was deferred "pending local execution" is now due here. The lesson worth keeping:
+a single negative probe was allowed to establish a structural limit for several
+rounds, and it was never cross-checked against the project's own upstream.
