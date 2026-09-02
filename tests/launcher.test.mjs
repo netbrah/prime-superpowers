@@ -25,6 +25,7 @@ import {
   buildModelEnvironment,
   createDepthVerdictServer,
   evaluateDepthStatus,
+  initializeRunLedger,
   managementArgs,
   queryDepthStatus,
   run,
@@ -102,14 +103,79 @@ test("run composes firewall worktree registry and process in order", async () =>
     dependencies: {
       firewall: async () => (order.push("firewall"), { forwardedArgv: ["prompt"], presentationEnv: {} }),
       worktree: async () => (order.push("worktree"), { worktreeRoot: "/worktree", targetRoot: "/target", branch: "prime/ordered" }),
-      runtimeHome: async () => (order.push("runtime-home"), { runtimeHome: "/runtime", daemonSocket: "/run/socket" }),
+      runtimeHome: async () => (order.push("runtime-home"), { runRoot: "/run", runtimeHome: "/runtime", daemonSocket: "/run/socket" }),
+      initializeLedger: async () => order.push("ledger"),
       packagePreflight: async () => order.push("package"),
       reserve: async () => order.push("registry"),
       spawn: async () => (order.push("spawn"), 0),
     },
   });
   assert.equal(code, 0);
-  assert.equal(order.join(","), "firewall,worktree,runtime-home,package,registry,spawn");
+  assert.equal(order.join(","), "firewall,worktree,runtime-home,ledger,package,registry,spawn");
+});
+
+test("launcher initializes plan-bound ledger before spawn", async (t) => {
+  const kitRoot = await temp(t);
+  const runRoot = join(kitRoot, ".state", "runs", "ledger-order");
+  const planPath = join(kitRoot, "plan.md");
+  await mkdir(runRoot, { recursive: true });
+  await writeFile(planPath, "# Frozen plan\n");
+  const result = await initializeRunLedger({
+    runRoot,
+    runId: "ledger-order",
+    planPath,
+    acceptanceCommands: ["node --test tests/launcher.test.mjs", "bash tests/test-package.sh", "./scripts/gate"],
+  });
+  assert.equal(result.ok, true);
+  const [record] = (await readFile(join(runRoot, "ledger.jsonl"), "utf8"))
+    .trim().split("\n").map(JSON.parse);
+  assert.match(record.detail.planHash, /^[0-9a-f]{64}$/);
+  assert.deepEqual(record.detail.acceptanceCommands, [
+    "node --test tests/launcher.test.mjs",
+    "bash tests/test-package.sh",
+    "./scripts/gate",
+  ]);
+  await initializeRunLedger({
+    runRoot,
+    runId: "ledger-order",
+    planPath,
+    acceptanceCommands: ["node --test tests/launcher.test.mjs", "bash tests/test-package.sh", "./scripts/gate"],
+  });
+  await assert.rejects(
+    initializeRunLedger({
+      runRoot,
+      runId: "ledger-order",
+      planPath,
+      acceptanceCommands: ["different"],
+    }),
+    (error) => error.code === "E_PLAN_IDENTITY",
+  );
+});
+
+test("unreadable plan refuses to spawn", async () => {
+  let spawned = false;
+  await assert.rejects(
+    run({
+      argv: ["prompt"],
+      runId: "unreadable-plan",
+      targetDir: "/target",
+      dependencies: {
+        firewall: async () => ({ forwardedArgv: ["prompt"], presentationEnv: {} }),
+        worktree: async () => ({ worktreeRoot: "/worktree", targetRoot: "/target", branch: "prime/test" }),
+        runtimeHome: async () => ({ runRoot: "/missing-run", runtimeHome: "/runtime", daemonSocket: "/run/socket" }),
+        initializeLedger: () => initializeRunLedger({
+          runRoot: "/missing-run",
+          runId: "unreadable-plan",
+          planPath: "/definitely/missing/implementation-plan.md",
+        }),
+        packagePreflight: async () => {},
+        reserve: async () => {},
+        spawn: async () => { spawned = true; return 0; },
+      },
+    }),
+    (error) => error.code === "E_PLAN_IDENTITY",
+  );
+  assert.equal(spawned, false);
 });
 
 test("composes from the real template and real generated models without mutating template", async (t) => {
