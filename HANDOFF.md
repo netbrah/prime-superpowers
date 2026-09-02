@@ -41,51 +41,85 @@ upstream revisions are under `docs/research/`.
 
 ## Current Plan Gate
 
-The authoritative latest hostile reviews are:
+**The plan gate is closed. Phase 0 (design amendment) and Phase 1 (plan repair)
+are complete and pushed. Start at Task 0.**
+
+The zero-Blocker/zero-Major gate was deliberately relaxed to avoid livelock in
+review iteration. Instead of iterating review rounds, the design and plan
+received one bounded repair pass covering execution-blocking defects only, and
+every remaining finding was moved to a register with an owning task and the
+evidence required to close it:
 
 ```text
-docs/reviews/plan-sol-round-3.md
-docs/reviews/plan-opus-round-3.md
+docs/specs/open-findings.md
 ```
 
-Gemini round three approved the plan, but Sol reported four Blockers and six
-Majors, and Opus reported three Blockers and three Majors. Do not start Task 0
-until a revised plan receives fresh zero-Blocker/zero-Major reviews.
+Read that register before starting, and again before the final review.
 
-### Blockers to resolve
+### What was fixed in this pass
 
-- The proposed extension `input` hook cannot intercept the built-in
-  `/rlm-max-depth` TUI command. Persisted session depth has higher precedence
-  than global settings, so depth-one enforcement needs a feasible mechanism or
-  a consciously reduced guarantee.
-- Task 8 modifies the `prime` and `prime.cmd` entry points without listing them
-  in its exact file manifest.
-- Prime Agent 0.8.1 does not provide the frozen `model list --json` contract,
-  and that command cannot expose skill collisions, extension filtering, cwd,
-  or prompt composition.
-- A direct Prime command cannot emit the kit-owned `E_PACKAGE_UNRESOLVED`
-  failure because Prime silently skips an unavailable package. The kit launcher
-  must own and exercise this check.
+Design (`32952c9`), from Sol design round 6 — three Blockers and one Major, all
+factual errors about Prime 0.8.1's real behavior:
 
-### Major issues to resolve
+- Runtime topology now uses Prime's actual agent-dir layout: file `auth.json`
+  (not a directory), `harness/`, no fictitious `cache/`. A per-run daemon socket
+  is passed explicitly on every start/attach/status/stop, because Prime's
+  default socket is process-global and would let two runs share one daemon.
+  Session-dir overrides became protected controls.
+- The package cache links at Prime's real computed leaf,
+  `git/github.com/obra/superpowers`. The previous `packages/` location would
+  have been silently ignored and Prime would have cloned over the network.
+- Depth observation moved off the kernel's stale numeric `RLM_MAX_DEPTH` onto
+  Prime's daemon depth-status channel, which is the only surface exposing
+  `{value, source}`. The guarantee is now narrowed and honest: fail-closed
+  refusal at each sanctioned admission plus bounded-poll detection, not
+  instantaneous prevention.
+- The integrity manifest now covers generated `models.json` and the package
+  link's canonical target, not just copied files.
 
-- Freeze exact exported interfaces for the workflow controller and its state,
-  ledger, and policy-history dependencies.
-- Reconcile cross-task ownership where later tasks modify skill files asserted
-  by earlier frozen tests.
-- Define how `resources.lock.json` represents package-provided skills.
-- Record the per-run agent-home architecture change explicitly in the design,
-  or choose a different immutable runtime topology.
-- Prevent each per-run agent-home copy from re-cloning Superpowers. Use a
-  verified shared package cache or another pinned, offline-capable materialized
-  source.
-- Replace the static runtime oracle with observable system-prompt/resource
-  output produced through a real model turn.
-- Freeze exact native-wire and RLM scripted response frames, termination events,
-  artifact paths, and expected statuses.
-- Make Task 0 start from a committed clean tree and list every path it changes.
+Plan (`9e94b76`), execution blockers only:
 
-Read the complete reviews rather than relying only on this summary.
+- Task 8's `Files` list now includes `prime` and `lib/launcher-process.mjs`,
+  which its green behavior always required it to modify.
+- Task 15's oracle no longer uses `model list --json`, which does not exist.
+  Prime prints a chalk-colored human-readable table; the oracle now runs
+  `model list` with `NO_COLOR=1` and parses columns.
+- Task 8 is named the sole emitter of `E_PACKAGE_UNRESOLVED`, before spawn.
+- `tests/test-package.sh` became a fixed driver created once in Task 1, sourcing
+  per-task `tests/package-manifest.d/<NN>-<name>.sh` fragments. It was previously
+  appended to by all 18 tasks, which made parallel batches impossible.
+- Cross-batch interfaces are frozen in the plan: `lib/config.mjs` exports, the
+  runtime home layout, the controller CLI contract and its error codes, and the
+  ledger record shape.
+
+### Review coverage gap to carry forward
+
+The Opus seat's round-6 design review examined the **pre-amendment 297-line**
+design, not the amended artifact. Its zero-Blocker verdict validates the round-5
+closures only and is **not** approval of the runtime-home, package-cache, or
+depth sections, which currently have single-seat (Sol) coverage. The final
+tri-model review must explicitly cover those three sections and verify the
+artifact hash it is reviewing.
+
+### Phase 2 execution model
+
+Tasks 0 and 1 sequentially, then three parallel batches with **no per-task
+review gate**, then Tasks 15-18 sequentially, then one tri-model review of the
+whole implementation that also adjudicates the register.
+
+| Batch | Tasks | Owns |
+|---|---|---|
+| A | 4, 5, 6, 7, 8 | launcher chain, entry points |
+| B | 2, 11, 12, 13, 14 | config and workflow core |
+| C | 3, 9, 10 | `agent-home/`, skills |
+
+Batch file sets were verified disjoint (no duplicate paths, no prefix overlaps).
+Tasks 15-17 must stay serial: they run the real binary, bind ports, and write
+shared artifact directories.
+
+**This sandbox could not run Phase 2's runtime proofs.** Local Node is 20.x,
+below Prime's hard `>=22.8.0` floor, so Tasks 15-17 were never executable here.
+Verify `node --version` locally before Task 0.
 
 ## Required Working Method
 
