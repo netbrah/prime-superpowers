@@ -1,0 +1,5 @@
+package_executable "prime"
+package_file "prime.cmd"
+package_file "lib/launcher-process.mjs"
+package_file "tests/launcher-process.test.mjs"
+package_executable "tests/fixtures/bin/fake-prime"
