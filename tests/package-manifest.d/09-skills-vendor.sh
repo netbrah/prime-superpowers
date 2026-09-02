@@ -1,0 +1,6 @@
+package_directory "agent-home/skills/using-superpowers"
+package_directory "agent-home/skills/subagent-driven-development"
+package_file "UPSTREAM.md"
+package_file "tests/skills-vendor.test.mjs"
+package_file "tests/fixtures/plans/minimal.md"
+package_file "tests/package-manifest.d/09-skills-vendor.sh"
