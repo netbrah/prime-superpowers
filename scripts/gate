@@ -16,6 +16,21 @@ else
   printf 'suite=git-diff state=skipped\n'
 fi
 
+if [[ -f "$root/tests/test-package.sh" ]]; then
+  if bash "$root/tests/test-package.sh"; then
+    printf 'suite=package state=activated\n'
+  else
+    printf 'suite=package state=failed\n'
+    status=1
+  fi
+elif [[ -e "$root/tests/package-manifest.d/01-skeleton.sh" ]]; then
+  printf 'E_SUITE_MISSING: tests/test-package.sh\n' >&2
+  printf 'suite=package state=failed\n'
+  status=1
+else
+  printf 'suite=package state=skipped\n'
+fi
+
 shell_status=0
 while IFS= read -r -d '' file; do
   relative=${file#"$root/"}
@@ -40,5 +55,61 @@ else
   printf 'suite=shell state=failed\n'
   status=1
 fi
+
+suite_specs=(
+  "01-skeleton|toolchain|tests/toolchain.test.mjs"
+  "01-skeleton|gate|tests/gate.test.mjs"
+  "02-config|provider-config|tests/provider-config.test.mjs"
+  "03-extension|extension|tests/extension.test.mjs"
+  "04-launcher-process|launcher-process|tests/launcher-process.test.mjs"
+  "05-argv-firewall|argv-firewall|tests/argv-firewall.test.mjs"
+  "06-worktree|worktree|tests/worktree.test.mjs"
+  "07-run-registry|run-registry|tests/run-registry.test.mjs"
+  "08-launcher|launcher|tests/launcher.test.mjs"
+  "09-skills-vendor|skills-vendor|tests/skills-vendor.test.mjs"
+  "10-workflow-contract|workflow-contract|tests/workflow-contract.test.mjs"
+  "11-workflow-state|workflow-state|tests/workflow-state.test.mjs"
+  "12-ledger|ledger|tests/ledger.test.mjs"
+  "13-policy-history|policy-history|tests/policy-history.test.mjs"
+  "14-workflow-controller|workflow-controller|tests/workflow-controller.test.mjs"
+  "15-doctor|doctor|tests/doctor.test.mjs"
+  "15-doctor|prime-runtime|tests/prime-runtime.test.mjs"
+  "16-wire-probe|wire-probe|tests/wire-probe.test.mjs"
+  "17-rlm-runtime|rlm-runtime|tests/rlm-runtime.test.mjs"
+)
+
+declare -A known_tests=()
+for spec in "${suite_specs[@]}"; do
+  IFS='|' read -r marker suite relative <<< "$spec"
+  test_path=$root/$relative
+  marker_path=$root/tests/package-manifest.d/$marker.sh
+  known_tests["$relative"]=1
+  if [[ -f "$test_path" ]]; then
+    if node --test "$test_path"; then
+      printf 'suite=%s state=activated\n' "$suite"
+    else
+      printf 'suite=%s state=failed\n' "$suite"
+      status=1
+    fi
+  elif [[ -e "$marker_path" ]]; then
+    printf 'E_SUITE_MISSING: %s\n' "$relative" >&2
+    printf 'suite=%s state=failed\n' "$suite"
+    status=1
+  else
+    printf 'suite=%s state=skipped\n' "$suite"
+  fi
+done
+
+# Fail closed if a later task adds a test without registering it in the fixed
+# stage table. The null-delimited walk also prevents a literal unmatched glob
+# from ever reaching Node.
+while IFS= read -r -d '' test_path; do
+  relative=${test_path#"$root/"}
+  if [[ -z ${known_tests["$relative"]+x} ]]; then
+    printf 'E_SUITE_UNREGISTERED: %s\n' "$relative" >&2
+    printf 'suite=%s state=failed\n' "${relative##*/}"
+    status=1
+  fi
+done < <(find "$root/tests" -maxdepth 1 -type f -name '*.test.mjs' -print0 2>/dev/null)
 
 exit "$status"
