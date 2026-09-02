@@ -184,7 +184,7 @@ NODE
 prime_binary=$TOOLCHAIN_DIR/node_modules/.bin/prime-agent
 [ -x "$prime_binary" ] ||
   fail E_PACKAGE_BINARY "installed prime-agent binary is not executable: $prime_binary"
-prime_version=$("$prime_binary" --version 2>/dev/null) ||
+prime_version=$("$prime_binary" --version 2>&1) ||
   fail E_PACKAGE_BINARY "installed prime-agent --version failed"
 [ "$prime_version" = "0.8.1" ] ||
   fail E_PACKAGE_IDENTITY "prime-agent --version expected 0.8.1, got $prime_version"

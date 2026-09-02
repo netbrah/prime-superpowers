@@ -60,7 +60,7 @@ cat > "$prefix/node_modules/prime-agent/package.json" <<'JSON'
 JSON
 cat > "$prefix/node_modules/.bin/prime-agent" <<'SH'
 #!/bin/sh
-printf '%s\\n' '${installedVersion}'
+printf '%s\\n' '${installedVersion}' >&2
 SH
 chmod +x "$prefix/node_modules/.bin/prime-agent"
 mkdir -p "$PRIME_AGENT_CODING_AGENT_DIR/bin" "$PRIME_AGENT_KERNEL_VENV/bin"
