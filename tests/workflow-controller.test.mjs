@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createLedger, appendLedger, readLedger } from "../lib/ledger.mjs";
-import { createDepthVerdictServer } from "../lib/launcher.mjs";
+import { createDepthVerdictServer, run as launchRun } from "../lib/launcher.mjs";
 import {
   ControllerError,
   createWorkflowController,
@@ -68,6 +68,7 @@ test("admit uses the real launcher verdict endpoint and persists before success"
     model: "prime-proxy-openai/gpt-5.6-sol",
   });
   assert.equal(result.ok, true);
+  assert.match(result.admissionId, /^admission-/);
   assert.match(result.snippet, /await rlm\.run\(validated_prompt/);
   const records = await readLedger(ledgerPath);
   assert.equal(records.at(-1).event, "admission");
@@ -81,6 +82,28 @@ test("real launcher run layout admits without fixture-seeded ledger", async (t) 
   const runRoot = join(kitRoot, ".state", "runs", runId);
   const runtimeHome = join(runRoot, "agent-home");
   await mkdir(runtimeHome, { recursive: true });
+  const planPath = join(kitRoot, "implementation-plan.md");
+  await writeFile(planPath, "# Real launcher plan\n");
+  await launchRun({
+    kitRoot,
+    runId,
+    targetDir: kitRoot,
+    argv: ["prompt"],
+    planPath,
+    acceptanceCommands: ["node --test", "bash tests/test-package.sh", "./scripts/gate"],
+    dependencies: {
+      firewall: async () => ({ forwardedArgv: ["prompt"], presentationEnv: {} }),
+      worktree: async () => ({ worktreeRoot: kitRoot, targetRoot: kitRoot, branch: "prime/test" }),
+      runtimeHome: async () => ({
+        runRoot,
+        runtimeHome,
+        daemonSocket: join(runtimeHome, "daemon", "daemon.sock"),
+      }),
+      packagePreflight: async () => {},
+      reserve: async () => {},
+      spawn: async () => 0,
+    },
+  });
   const endpointPath = join(runRoot, "depth-verdict.sock");
   const endpoint = await createDepthVerdictServer({
     endpointPath,
@@ -168,8 +191,32 @@ test("success report reconciles disk artifact and records every transition", asy
   await writeFile(admission.reportPath, "worker result\n");
   const result = await f.controller.report({ childId: "real-child-1", status: "ok" });
   assert.equal(result.ok, true);
-  const events = (await readLedger(f.ledgerPath)).map((record) => record.event);
-  assert.deepEqual(events.slice(-4), ["running", "reported", "completed", "report-ack"]);
+  const records = await readLedger(f.ledgerPath);
+  assert.deepEqual(records.slice(-5).map((record) => record.event), [
+    "child-bound", "running", "reported", "completed", "report-ack",
+  ]);
+  assert.deepEqual(records.find((record) => record.event === "child-bound").detail, {
+    admissionId: admission.admissionId,
+    childId: "real-child-1",
+  });
+});
+
+test("unbound child is ambiguous with multiple live admissions", async (t) => {
+  const f = await setup(t);
+  const first = await f.controller.admit({ taskId: "review-sol", model: "provider/sol" });
+  const second = await f.controller.admit({ taskId: "review-opus", model: "provider/opus" });
+  await assert.rejects(
+    f.controller.report({ childId: "real-child", status: "fail" }),
+    (error) => error.code === "E_ADMISSION_AMBIGUOUS",
+    "expected E_ADMISSION_AMBIGUOUS rather than guessing a live admission",
+  );
+  const result = await f.controller.report({
+    admissionId: second.admissionId,
+    childId: "real-child",
+    status: "fail",
+  });
+  assert.equal(result.taskId, "review-opus");
+  assert.notEqual(first.admissionId, second.admissionId);
 });
 
 test("timeout cancel retry and late report use Task 11 transitions", async (t) => {
@@ -231,6 +278,11 @@ test("frozen CLI accepts only admit report status and rejects capability flags",
   });
   assert.deepEqual(parseControllerArgs(["report", "--child", "child-1", "--status", "ok", "--json"]), {
     command: "report", childId: "child-1", status: "ok", json: true,
+  });
+  assert.deepEqual(parseControllerArgs([
+    "report", "--admission", "admission-1", "--child", "child-1", "--status", "ok", "--json",
+  ]), {
+    command: "report", admissionId: "admission-1", childId: "child-1", status: "ok", json: true,
   });
   assert.deepEqual(parseControllerArgs(["status", "--json"]), { command: "status", json: true });
   for (const argv of [
