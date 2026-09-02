@@ -108,6 +108,7 @@ agent-home/skills/subagent-driven-development/final-reviewer-prompt.md
 agent-home/skills/subagent-driven-development/scripts/
 scripts/doctor
 tests/test-package.sh
+tests/package-manifest.d/
 tests/provider-config.test.mjs
 tests/fixtures/
 docs/specs/
