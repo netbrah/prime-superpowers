@@ -21,7 +21,9 @@ Open findings register: `docs/specs/open-findings.md`
 - Review rounds are a loop with fresh reviewers and revised immutable ranges. The cap is five rounds; rounds four and five use frontier tiers. A Blocker/Major downgrade requires written concurrence from another family. A nonzero round-five result stops for the operator.
 - Declare package-owned paths by writing `tests/package-manifest.d/<NN>-<name>.sh` in the same task that introduces them. Never edit `tests/test-package.sh` after Task 1; it is a fixed driver, and a shared append target would make parallel batches conflict.
 - No task may modify paths outside its `Files` list. A new dependency requires a plan amendment and fresh plan review.
-- Do not push, merge, release, or delete worktrees during implementation.
+- **Push the build branch continuously; never merge, release, or delete worktrees during implementation.** An earlier revision of this contract forbade pushing outright. That is superseded: an interrupted or budget-exhausted run must not lose committed work. After each green step the worker commits and immediately pushes `prime/kit-build-<run-id>` to `origin`. The prohibition that remains is narrower and still absolute — no implementation commit reaches `main` or `master`, no merge, no release, no worktree deletion. Pushing a build branch is not integration.
+- Commit granularity is one green step, not one task. A task's red evidence, its green implementation, and its manifest fragment may land as separate commits provided each commit's recorded state is truthful. Never leave more than one green step unpushed.
+- Because the branch is pushed continuously, the resumption record must be reconstructible from the branch alone. `.superpowers/` is ignored orchestration state and is never committed, so a worker that stops partway states the next action in its final commit message as well as in `progress.md`.
 
 ## Stage-aware gates
 
