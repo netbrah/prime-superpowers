@@ -1,0 +1,5 @@
+package_file "lib/workflow-controller.mjs"
+package_executable "scripts/workflow-controller"
+package_file "tests/workflow-controller.test.mjs"
+package_directory "tests/fixtures/workflow-controller"
+package_file "tests/package-manifest.d/14-workflow-controller.sh"

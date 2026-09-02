@@ -610,3 +610,44 @@ After that council alone reaches zero Blocker/Major, make a separate orchestrati
 - **Model metadata:** frozen in a literal five-row fixture sourced from Prime 0.8.1.
 - **Missing surfaces:** assigned unsafe args, `.git/info/exclude`, `prime.cmd`, Node/npm preflight wiring, kernel/tool bootstrap, fail-closed package install, immutable runtime agent homes, policy history, and outcome evaluation.
 - **Portability/minors:** harmonized `provider-config.test.mjs`, ephemeral loopback ports, credential-free static doctor, ESM file URL handling, script modes, tool prerequisites, explicit dependencies, and one nonduplicated final council.
+
+## Amendment: Task 8a — launcher initializes the run ledger
+
+Batch 3 halted Task 14 on a real plan gap. Task 12 requires a ledger
+initialized with a truthful plan hash and acceptance commands; Task 8 composes
+the run layout but only ever *reads* `ledger.jsonl`; and the frozen Task 14 CLI
+(`admit`, `report`, `status`) carries no initialization inputs. Real-layout
+admission therefore fails with `E_LEDGER_UNINITIALIZED`. The worker correctly
+refused to commit a fixture-seeded green.
+
+**The ledger must be initialized by the launcher, not the controller.** This is
+a security constraint, not a convenience. `createLedger` records `planHash` and
+`acceptanceCommands` as the run's identity anchor, and the controller is
+model-reachable by design. A controller-supplied plan identity would let a model
+write a false plan hash into the append-only ledger and then satisfy every later
+integrity check against its own fabricated anchor. The launcher is the trusted
+composer and the only component that can compute the hash from the plan file on
+disk.
+
+**Task 8a scope** — strictly within Task 8's existing `Files` list:
+
+- At run composition, before spawning Prime, the launcher computes the plan hash
+  by digesting the plan file it was invoked against, reads the frozen acceptance
+  commands, and calls `createLedger` at
+  `<kit>/.state/runs/<run-id>/ledger.jsonl`.
+- Initialization is fail-closed. If the plan file is unreadable, the hash cannot
+  be computed, or `createLedger` reports `E_PLAN_IDENTITY`, the launcher refuses
+  to spawn rather than starting a run with an anchorless ledger.
+- Re-composition of an existing run must not clobber a populated ledger.
+  `createLedger` already fails `E_LEDGER_EXISTS`; the launcher treats an
+  existing valid ledger as satisfied and proceeds.
+- The controller gains no initialization surface. The frozen CLI is unchanged.
+
+**Task 14 amendment — child binding.** The worker also found no frozen operation
+binding the child id returned by `rlm.run` to its prior admission, making
+`report --child` ambiguous when several review children are live. `admit` MUST
+return an admission id in its `--json` payload, and `report` MUST accept
+`--admission <id>` alongside `--child <id>`. The controller records the binding
+in the ledger on first `report` for a given admission. A `report --child` naming
+an unbound child with more than one live admission is refused
+`E_ADMISSION_AMBIGUOUS` rather than guessed.

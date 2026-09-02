@@ -1,0 +1,13 @@
+#!/usr/bin/env node
+import { cli } from "../lib/workflow-controller.mjs";
+
+cli(process.argv.slice(2)).then(
+  (code) => { process.exitCode = code; },
+  (error) => {
+    process.stdout.write(`${JSON.stringify({
+      ok: false,
+      code: error?.code ?? "E_CONTROLLER_REQUIRED",
+    })}\n`);
+    process.exitCode = 1;
+  },
+);
