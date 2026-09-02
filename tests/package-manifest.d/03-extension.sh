@@ -1,0 +1,8 @@
+package_file "agent-home/extensions/prime-superpowers.js"
+package_file "agent-home/settings.json"
+package_file "agent-home/AGENTS.md"
+package_file "agent-home/prompts/coordinator.md"
+package_file "agent-home/prompts/child.md"
+package_file "tests/extension.test.mjs"
+package_file "tests/fixtures/extension-api.mjs"
+package_file "tests/package-manifest.d/03-extension.sh"

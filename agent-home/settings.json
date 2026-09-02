@@ -1,0 +1,10 @@
+{
+  "rlmMaxDepth": 1,
+  "packages": [
+    {
+      "source": "git:github.com/obra/superpowers@v6.3.0",
+      "extensions": []
+    }
+  ],
+  "extensions": []
+}
