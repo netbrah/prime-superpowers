@@ -8,6 +8,11 @@ STATE_DIR=$KIT_ROOT/.state/toolchain
 AGENT_DIR=$STATE_DIR/agent-home
 KERNEL_VENV=$STATE_DIR/kernel-venv
 RELEASE_BASE_URL=${PRIME_TOOLCHAIN_RELEASE_BASE_URL:-https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/releases/v0.8.1}
+if [ -n "${PRIME_TOOLCHAIN_RELEASE_BASE_URL-}" ]; then
+  RELEASE_METADATA_URL=${PRIME_TOOLCHAIN_METADATA_URL:-$RELEASE_BASE_URL/latest.json}
+else
+  RELEASE_METADATA_URL=${PRIME_TOOLCHAIN_METADATA_URL:-https://github.com/PrimeIntellect-ai/prime-agent/releases/download/v0.8.1/latest.json}
+fi
 
 fail() {
   code=$1
@@ -108,7 +113,7 @@ verify_downloads() {
     fail E_DOWNLOAD_TEMP "cannot create temporary download directory"
   trap 'rm -rf "$download_dir"' EXIT HUP INT TERM
 
-  curl -fsSL "$RELEASE_BASE_URL/latest.json" -o "$download_dir/latest.json" ||
+  curl -fsSL "$RELEASE_METADATA_URL" -o "$download_dir/latest.json" ||
     fail E_DOWNLOAD_FETCH "could not download latest.json"
   node - "$download_dir/latest.json" > "$download_dir/latest.tsv" <<'NODE' ||
 const fs = require("node:fs");
