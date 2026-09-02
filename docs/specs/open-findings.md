@@ -206,3 +206,45 @@ the socket, so the documented boundary matches reality rather than aspiration.
 | EXEC-B2-3 | Prime 0.8.1 has no `--color` flag; wrapper translates to `NO_COLOR`/`FORCE_COLOR`. Design should record this. | open |
 | EXEC-B2-4 | `status --daemon-socket PATH` is unsupported ("Unknown option for status"). Supported per-socket form is `list --daemon-socket PATH --json`. Wrapper status goes through the launcher-owned client instead. | open |
 | EXEC-B2-5 | Task 4's inherited test still expects `E_NOT_COMPOSED` though Task 8 supersedes that stub. Task 8 could not edit Task 4's test under the file contract. Reconcile at Task 18. | open |
+
+## Coordinator error: PROC-1 — `git add -A` swept an unreviewed implementation into a plan commit
+
+Commit `79f7cdc`, whose message reads `plan: add Task 8a launcher ledger init,
+freeze admission binding`, actually contains **708 lines of unreviewed Task 14
+implementation** in addition to the 41-line plan amendment:
+
+```
+docs/specs/...implementation-plan.md          |  41 ++
+lib/workflow-controller.mjs                   | 447 +++
+scripts/workflow-controller                   |  13 +
+tests/fixtures/workflow-controller/README.txt |   2 +
+tests/package-manifest.d/14-workflow-controller.sh |   5 +
+tests/workflow-controller.test.mjs            | 241 +++
+```
+
+Cause: the coordinator ran `git add -A` while a prior worker's deliberately
+uncommitted Task 14 candidate sat untracked in the worktree. The worker had
+refused to commit that candidate precisely because it was known-red.
+
+Three consequences, all real:
+
+1. **The commit message is false.** It advertises a plan amendment and delivers
+   an implementation.
+2. **`79f7cdc` is a known-red commit on the branch.** The Task 14 integration
+   test failed there. This violates the execution contract's own rule that
+   "each commit's recorded state is truthful", and it is why the isolated
+   Task 8a commit `b9d78b1` does not independently pass the full gate.
+3. **A worker's correct refusal was silently overridden.** The strongest
+   safety behavior observed in this build — stopping rather than shipping a
+   fixture-only green — was undone by coordinator carelessness, not by any
+   decision to accept the candidate.
+
+History is NOT being rewritten: `79f7cdc` is an ancestor of the pushed, green
+`b9d78b1` and `ac26c42`, and rewriting would invalidate two legitimately
+reviewed commits to cosmetically repair one. The branch is green at `ac26c42`
+(132 tests, 79 ownership assertions, 18 suites).
+
+**Standing rule going forward: the coordinator commits with explicit paths
+(`git add <path>`), never `git add -A`, while any worker's uncommitted state may
+be present.** Bisecting this branch across `79f7cdc` will hit a red commit;
+the final review should be told so it is not read as a regression.
