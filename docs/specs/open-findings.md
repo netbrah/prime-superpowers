@@ -24,8 +24,8 @@ These were fixed directly in `docs/specs/2026-08-26-prime-superpowers-design.md`
 
 | ID | Finding | Status |
 | --- | --- | --- |
-| COV-D6-1 | The Opus seat's round-6 review examined the **pre-amendment 297-line** design (md5 `5156f716d59870854cab72621e862edb`, header "round 5 findings incorporated"), not the amended artifact. Its "0 Blockers, 0 Majors" verdict validates the round-5 closures only and is **not** an approval of the runtime-home, package-cache, or depth-guarantee sections. Those sections currently have single-seat (Sol) coverage. Both `design-opus-round-6.md` and `design-opus-round-6-prior-artifact-297L.md` are byte-identical copies of that stale review. | open — assigned to the final tri-model review, which must read the current artifact hash and explicitly cover the three round-6 sections |
-| OPUS-D6-N1..N9 | Nine minors against the pre-amendment text (documentary/annotation quality: unnamed compat flag, npm floor and `engine-strict` caveat, doctor host-runtime fault category, thinking-map annotations). Recorded in `docs/reviews/design-opus-round-6.md`. They target sections the amendment did not change, so they remain applicable. | open — non-blocking, sweep before ship |
+| COV-D6-1 | **CLOSED.** The Opus seat's *first* round-6 artifact examined the pre-amendment 297-line design (md5 `5156f716d59870854cab72621e862edb`), so its "0 Blockers" verdict validated only the round-5 closures. The seat subsequently delivered a genuine review of the amended 359-line artifact (sha256 `419a71c6…`), preserving the stale copy as `design-opus-round-6-prior-artifact-297L.md`. The runtime-home, package-cache, and depth sections now have two-seat coverage. Findings recorded in the round-6 section below. | closed |
+| OPUS-D6-N1..N9 | Nine minors from the stale pre-amendment pass (documentary/annotation quality: unnamed compat flag, npm floor and `engine-strict` caveat, doctor host-runtime fault category, thinking-map annotations). Recorded in `docs/reviews/design-opus-round-6.md`. They target sections the amendment did not change, so they remain applicable. | open — non-blocking, sweep before ship |
 
 ---
 
@@ -57,3 +57,51 @@ Depth-interception findings SOL-P3-B1 and OPUS-P3-B1 are superseded by the desig
 - No task modifies paths outside its declared `Files` list.
 - Every task carries reachable red and green oracles.
 - Reviews are model-diverse; a single seat is never sufficient sign-off.
+
+## Opus design round 6 (real review, 359-line artifact)
+
+The earlier `COV-D6-1` coverage gap is **closed**. The Opus seat delivered a
+genuine review of the amended 359-line artifact (sha256 `419a71c6…`), preserving
+its stale predecessor as `design-opus-round-6-prior-artifact-297L.md`. The
+amended runtime-home, package-cache, and depth sections now have two-seat
+coverage.
+
+| ID | Severity | Status | Owner | Closing evidence |
+|---|---|---|---|---|
+| OPUS-D6-B1 | Blocker | fixed in design + plan | Task 8, Task 14 | Socket path and session identity absent from kernel env, controller env/args, and every model-reachable child env; controller obtains verdict-only `{ok, code?}`; `set_rlm_max_depth` unreachable from controller |
+| OPUS-D6-M1 | Major | fixed in design + plan | Task 8 | Prime-initiated `settings.json` rewrite preserving predicates leaves run healthy and does not orphan it |
+| OPUS-D6-M2 | Major | fixed in design + plan | Task 8 | Admission accepted for source `inherited`, refused for `chat`/`env` |
+| OPUS-D6-M3 | Major | fixed in design + plan | Task 8 | `bin/` resolves to shared cache; second run performs no tool download |
+| OPUS-D6-N1..N5 | Minor | open | final review | Adjudicate at final tri-model review |
+
+### OPUS-D6-B1 was a regression this project introduced
+
+Recorded plainly because the register exists to prevent repeats. Round 6's own
+depth fix created the vulnerability. Moving depth observation onto the daemon
+channel was correct — it is the only surface exposing `{value, source}` — but the
+fix handed the socket path and active session id to the *model-invoked
+controller*. The same socket accepts `set_rlm_max_depth`, whose `global` form
+persists to `settings.json`, gated only by the session id.
+
+Before the fix the model had no depth-write primitive at all. After it, the
+component whose privileges the depth guarantee is designed to bound could raise
+its own limit. The lesson generalizes beyond depth: **granting a read capability
+by handing over a channel grants every write the channel accepts.** The
+correction keeps the daemon client on the launcher's side of the trust boundary
+and passes a verdict rather than a channel.
+
+The same review also found the design *under-claimed* its guarantee: Prime
+hard-refuses grandchild spawn in-process at `agent-session.ts:10214-10217`. That
+guard is now credited as the primary enforcement, with the kit's controls
+positioned as configuration keeping and auditability. Task 15 must verify the
+guard directly with the kit's gate stubbed open, so the two enforcement layers
+are proven independent.
+
+### Stale-mock hazard found while applying B1
+
+Task 10 required an extension `input` handler to intercept `/rlm-max-depth`.
+That is impossible against the real binary for the reason already documented in
+the design, so the requirement was removed. It would have produced a green test
+against a mock and a false guarantee in production. Any remaining requirement
+whose oracle is satisfiable only by a mock should be treated the same way at
+implementation time.
