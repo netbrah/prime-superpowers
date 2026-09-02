@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+printf '{"activeSessionId":"fake-parent"}\n'
+exit "${FAKE_PRIME_EXIT:-0}"

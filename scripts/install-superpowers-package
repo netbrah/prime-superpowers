@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+kit_root=$(cd -- "$script_dir/.." && pwd)
+source_url=${1:-https://github.com/obra/superpowers.git}
+cd "$kit_root"
+
+exec node --input-type=module - "$kit_root" "$source_url" <<'NODE'
+import { installSuperpowersPackage } from "./lib/launcher.mjs";
+
+const [, , kitRoot, source] = process.argv;
+const result = await installSuperpowersPackage({ kitRoot, source });
+process.stdout.write(`${JSON.stringify(result)}\n`);
+NODE

@@ -1,0 +1,5 @@
+package_file "lib/launcher.mjs"
+package_executable "scripts/install-superpowers-package"
+package_file "tests/launcher.test.mjs"
+package_executable "tests/fixtures/bin/fake-prime-session"
+package_directory "tests/fixtures/launcher"
