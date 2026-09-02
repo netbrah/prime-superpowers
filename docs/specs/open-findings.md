@@ -159,3 +159,50 @@ Corrected by cherry-picking the three commits onto the build branch. **Standing
 rule going forward: spec amendments during implementation land on the build
 branch, not on `main`, and `main` is reconciled when the branch integrates.**
 Amending specs on two branches at once is what created the drift.
+
+## Batch 2 execution findings (Tasks 4-8)
+
+### EXEC-B2-1 (Major, verified against Prime 0.8.1 source) — env stripping is defense-in-depth, not the depth guarantee
+
+Task 8's worker reported that its tests prove the socket path and session id are
+absent from model-reachable environments, but do not prove unreachability from a
+hostile same-UID process. Verified directly in Prime 0.8.1 source, and the
+situation is stronger than "limitation" implies:
+
+- The daemon performs **no client authentication**. No `SO_PEERCRED`, no
+  `getpeereid`, no token. Searched `packages/coding-agent/src` — nothing.
+- `set_rlm_max_depth` sits in the same accepted-command list as
+  `get_rlm_max_depth_status` (`daemon-supervisor.ts:255`,
+  `daemon-protocol.ts:637`), so any client that can open the socket can lower
+  or raise depth, and the `global` form persists to `settings.json`.
+- The agent ships a **`bash` tool** (`core/tools/bash.ts`). A model therefore
+  has shell under the same UID as the launcher.
+
+Consequence: a model that goes looking can locate the socket on the filesystem
+and speak the protocol regardless of what the kit removes from its environment.
+Environment stripping raises cost and blocks accidental inheritance; it is not
+a boundary against a deliberate agent.
+
+**This does not sink the design, because depth was never guaranteed by env
+stripping.** Prime hard-refuses grandchild spawn in-process at
+`agent-session.ts:10214-10217`, which round 6 already credited as PRIMARY
+enforcement. The honest claim is layered:
+
+1. **Primary:** Prime's in-process refusal. Not reachable over the daemon socket.
+2. **Secondary:** the launcher's semantic `settings.json` predicates, which
+   detect a tampered `rlmMaxDepth` at verdict time.
+3. **Tertiary:** environment stripping, which prevents accidental leakage.
+
+**Required before release: the design must stop implying the trust boundary is
+env stripping.** Task 15 must verify claim 1 independently with the kit's gate
+stubbed open, and should add a negative proof that a same-UID client CAN reach
+the socket, so the documented boundary matches reality rather than aspiration.
+
+### Other Batch 2 findings
+
+| ID | Finding | Status |
+|---|---|---|
+| EXEC-B2-2 | Task 8's original text still says to use fixture templates and stub config, contradicting the serial amendment. Worker correctly followed the amendment. Plan text should be reconciled. | open |
+| EXEC-B2-3 | Prime 0.8.1 has no `--color` flag; wrapper translates to `NO_COLOR`/`FORCE_COLOR`. Design should record this. | open |
+| EXEC-B2-4 | `status --daemon-socket PATH` is unsupported ("Unknown option for status"). Supported per-socket form is `list --daemon-socket PATH --json`. Wrapper status goes through the launcher-owned client instead. | open |
+| EXEC-B2-5 | Task 4's inherited test still expects `E_NOT_COMPOSED` though Task 8 supersedes that stub. Task 8 could not edit Task 4's test under the file contract. Reconcile at Task 18. | open |
