@@ -1,0 +1,71 @@
+[
+  {
+    "id": "gpt-5.6-sol",
+    "name": "GPT-5.6 Sol",
+    "api": "openai-responses",
+    "provider": "prime-proxy-openai",
+    "baseUrl": "https://proxy.example/v1",
+    "reasoning": true,
+    "input": ["text", "image"],
+    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+    "contextWindow": 1050000,
+    "maxTokens": 128000,
+    "thinkingLevelMap": {"off": "none", "minimal": null, "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max"},
+    "compat": {"supportsLongCacheRetention": true}
+  },
+  {
+    "id": "gpt-5.6-terra",
+    "name": "GPT-5.6 Terra",
+    "api": "openai-responses",
+    "provider": "prime-proxy-openai",
+    "baseUrl": "https://proxy.example/v1",
+    "reasoning": true,
+    "input": ["text", "image"],
+    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+    "contextWindow": 1050000,
+    "maxTokens": 128000,
+    "thinkingLevelMap": {"off": "none", "minimal": null, "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max"},
+    "compat": {"supportsLongCacheRetention": true}
+  },
+  {
+    "id": "claude-opus-5",
+    "name": "Claude Opus 5",
+    "api": "anthropic-messages",
+    "provider": "prime-proxy-anthropic",
+    "baseUrl": "https://proxy.example",
+    "reasoning": true,
+    "input": ["text", "image"],
+    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+    "contextWindow": 1000000,
+    "maxTokens": 128000,
+    "thinkingLevelMap": {"off": "off", "minimal": null, "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max"},
+    "compat": {"supportsEagerToolInputStreaming": true, "supportsLongCacheRetention": true}
+  },
+  {
+    "id": "claude-sonnet-5",
+    "name": "Claude Sonnet 5",
+    "api": "anthropic-messages",
+    "provider": "prime-proxy-anthropic",
+    "baseUrl": "https://proxy.example",
+    "reasoning": true,
+    "input": ["text", "image"],
+    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+    "contextWindow": 1000000,
+    "maxTokens": 128000,
+    "thinkingLevelMap": {"off": "off", "minimal": null, "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max"},
+    "compat": {"supportsEagerToolInputStreaming": true, "supportsLongCacheRetention": true}
+  },
+  {
+    "id": "gemini-3.1-pro-preview",
+    "name": "Gemini 3.1 Pro Preview",
+    "api": "google-generative-ai",
+    "provider": "prime-proxy-google",
+    "baseUrl": "https://proxy.example/v1beta",
+    "reasoning": true,
+    "input": ["text", "image"],
+    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+    "contextWindow": 1048576,
+    "maxTokens": 65536,
+    "thinkingLevelMap": {"off": null, "minimal": null, "low": "LOW", "medium": null, "high": "HIGH", "xhigh": null, "max": null}
+  }
+]

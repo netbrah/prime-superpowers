@@ -1,0 +1,5 @@
+package_file "lib/config.mjs"
+package_file "tests/provider-config.test.mjs"
+package_file "tests/fixtures/model-profiles.json"
+package_directory "tests/fixtures/env"
+package_file "tests/package-manifest.d/02-config.sh"
