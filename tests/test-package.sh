@@ -70,7 +70,11 @@ for index in "${!assertion_paths[@]}"; do
       rest=${rest#*"${BASH_REMATCH[0]}"}
       normalized=${allowed%/}
       normalized=${normalized%/\*\*}
-      if [[ $relative == "$normalized" || $relative == "$normalized/"* ]]; then
+      if [[ $relative == "$normalized" ]]; then
+        owned=1
+        break
+      fi
+      if [[ ($allowed == */ || $allowed == */\*\*) && $relative == "$normalized/"* ]]; then
         owned=1
         break
       fi

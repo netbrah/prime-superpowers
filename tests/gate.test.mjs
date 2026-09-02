@@ -100,3 +100,42 @@ test("gate never passes a Node-shebang script to bash -n", async () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /suite=shell state=activated/);
 });
+
+test("package driver sources fragments in order and rejects undeclared descendants", async () => {
+  const kit = await mkdtemp(path.join(os.tmpdir(), "prime-package-kit-"));
+  await mkdir(path.join(kit, "tests", "package-manifest.d"), { recursive: true });
+  await mkdir(path.join(kit, "docs", "specs"), { recursive: true });
+  await cp(path.join(root, "tests", "test-package.sh"), path.join(kit, "tests", "test-package.sh"));
+  await cp(
+    path.join(root, "docs", "specs", "2026-08-26-prime-superpowers-implementation-plan.md"),
+    path.join(kit, "docs", "specs", "2026-08-26-prime-superpowers-implementation-plan.md"),
+  );
+  await writeFile(path.join(kit, ".gitignore"), "\n");
+  await writeFile(path.join(kit, "LICENSE"), "fixture\n");
+  await writeFile(
+    path.join(kit, "tests", "package-manifest.d", "01-z-last.sh"),
+    'package_file "LICENSE"\n',
+  );
+  await writeFile(
+    path.join(kit, "tests", "package-manifest.d", "01-a-first.sh"),
+    'package_file ".gitignore"\n',
+  );
+
+  const sorted = spawnSync("bash", [path.join(kit, "tests", "test-package.sh")], {
+    cwd: kit,
+    encoding: "utf8",
+  });
+  assert.equal(sorted.status, 0, sorted.stderr);
+  assert.match(sorted.stdout, /1\.\.2\nok 1 - Task 1 owns \.gitignore/);
+
+  await writeFile(
+    path.join(kit, "tests", "package-manifest.d", "01-m-invalid.sh"),
+    'package_file ".gitignore/undeclared-child"\n',
+  );
+  const invalid = spawnSync("bash", [path.join(kit, "tests", "test-package.sh")], {
+    cwd: kit,
+    encoding: "utf8",
+  });
+  assert.equal(invalid.status, 1);
+  assert.match(invalid.stdout, /code: E_PACKAGE_OWNERSHIP/);
+});
