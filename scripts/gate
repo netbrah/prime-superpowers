@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+root=$(cd -- "$script_dir/.." && pwd)
+status=0
+
+if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if git -C "$root" diff --check; then
+    printf 'suite=git-diff state=activated\n'
+  else
+    printf 'suite=git-diff state=failed\n'
+    status=1
+  fi
+else
+  printf 'suite=git-diff state=skipped\n'
+fi
+
+shell_status=0
+while IFS= read -r -d '' file; do
+  relative=${file#"$root/"}
+  first_line=
+  IFS= read -r first_line < "$file" || :
+  case "$relative:$first_line" in
+    *.sh:* | *:'#!'*'/sh' | *:'#!'*'/sh '* | *:'#!'*'/bash' | *:'#!'*'/bash '*)
+      if ! bash -n "$file" 2>/dev/null; then
+        printf 'E_SHELL_SYNTAX: %s\n' "$relative" >&2
+        shell_status=1
+      fi
+      ;;
+  esac
+done < <(
+  find "$root" \
+    \( -path "$root/.git" -o -path "$root/toolchain/node_modules" -o -path "$root/.state" \) -prune -o \
+    -type f -print0
+)
+if ((shell_status == 0)); then
+  printf 'suite=shell state=activated\n'
+else
+  printf 'suite=shell state=failed\n'
+  status=1
+fi
+
+exit "$status"
