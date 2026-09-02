@@ -1,0 +1,14 @@
+# Installed toolchain and generated runtime state
+/toolchain/node_modules/
+/.state/
+
+# Local worktrees and downloaded verification artifacts
+/.worktrees/
+/downloads/
+*.download
+*.tmp
+
+# Environment files may contain credentials
+.env
+.env.*
+!.env.example

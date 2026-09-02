@@ -1,0 +1,12 @@
+{
+  "name": "prime-superpowers-toolchain",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "npm@10.8.2",
+  "engines": {
+    "node": ">=22.8.0"
+  },
+  "dependencies": {
+    "prime-agent": "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/releases/v0.8.1/prime-agent-0.8.1.tgz"
+  }
+}

@@ -1,0 +1,221 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+KIT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+TOOLCHAIN_DIR=$KIT_ROOT/toolchain
+STATE_DIR=$KIT_ROOT/.state/toolchain
+AGENT_DIR=$STATE_DIR/agent-home
+KERNEL_VENV=$STATE_DIR/kernel-venv
+RELEASE_BASE_URL=${PRIME_TOOLCHAIN_RELEASE_BASE_URL:-https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/releases/v0.8.1}
+
+fail() {
+  code=$1
+  shift
+  printf '%s: %s\n' "$code" "$*" >&2
+  exit 1
+}
+
+version_at_least() {
+  actual=${1#v}
+  required=$2
+  old_ifs=$IFS
+  IFS=.
+  set -- $actual
+  actual_major=${1:-0}
+  actual_minor=${2:-0}
+  actual_patch=${3:-0}
+  set -- $required
+  required_major=${1:-0}
+  required_minor=${2:-0}
+  required_patch=${3:-0}
+  IFS=$old_ifs
+
+  case "$actual_major.$actual_minor.$actual_patch" in
+    *[!0-9.]* | .* | *..* | *.) return 1 ;;
+  esac
+
+  [ "$actual_major" -gt "$required_major" ] ||
+    { [ "$actual_major" -eq "$required_major" ] &&
+      { [ "$actual_minor" -gt "$required_minor" ] ||
+        { [ "$actual_minor" -eq "$required_minor" ] &&
+          [ "$actual_patch" -ge "$required_patch" ]; }; }; }
+}
+
+node_version=$(node --version 2>/dev/null) ||
+  fail E_NODE_VERSION "Node.js >=22.8.0 is required"
+version_at_least "$node_version" 22.8.0 ||
+  fail E_NODE_VERSION "Node.js >=22.8.0 is required; found $node_version"
+
+# Installation and provenance checks never need provider credentials. Remove
+# inherited values before npm, postinstall, or any downloaded executable runs.
+unset PRIME_LLM_KEY OPENAI_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY GEMINI_API_KEY || :
+
+npm_version=$(npm --version 2>/dev/null) ||
+  fail E_NPM_VERSION "npm 10.8.2 is required"
+[ "$npm_version" = "10.8.2" ] ||
+  fail E_NPM_VERSION "npm 10.8.2 is required; found $npm_version"
+
+package_manager=$(node -e '
+  const p = require(process.argv[1]);
+  process.stdout.write(typeof p.packageManager === "string" ? p.packageManager : "");
+' "$TOOLCHAIN_DIR/package.json" 2>/dev/null) ||
+  fail E_PACKAGE_MANIFEST "cannot read toolchain/package.json"
+[ "$package_manager" = "npm@10.8.2" ] ||
+  fail E_NPM_VERSION "toolchain packageManager must be npm@10.8.2; found ${package_manager:-missing}"
+
+verify_lock() {
+  node - "$TOOLCHAIN_DIR/package.json" "$TOOLCHAIN_DIR/package-lock.json" <<'NODE'
+const fs = require("node:fs");
+const [manifestPath, lockPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+const expectedUrl =
+  "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/releases/v0.8.1/prime-agent-0.8.1.tgz";
+if (manifest.dependencies?.["prime-agent"] !== expectedUrl) process.exit(10);
+if (lock.lockfileVersion !== 3) process.exit(11);
+if (lock.packages?.[""]?.dependencies?.["prime-agent"] !== expectedUrl) process.exit(12);
+const expectedFiles = new Set([
+  "prime-agent-0.8.1.tgz",
+  "prime-agent-ai-0.8.1.tgz",
+  "prime-agent-core-0.8.1.tgz",
+  "prime-agent-tui-0.8.1.tgz",
+]);
+for (const [key, entry] of Object.entries(lock.packages ?? {})) {
+  if (key && !entry.link && entry.resolved && !/^sha512-/.test(entry.integrity ?? "")) process.exit(13);
+  const file = entry.resolved?.split("/").pop();
+  if (expectedFiles.has(file)) {
+    if (entry.version !== "0.8.1" || !/^sha512-/.test(entry.integrity ?? "")) process.exit(14);
+    expectedFiles.delete(file);
+  }
+}
+if (expectedFiles.size) process.exit(15);
+NODE
+}
+
+verify_downloads() {
+  command -v curl >/dev/null 2>&1 ||
+    fail E_DOWNLOAD_TOOL "curl is required for --verify-downloads"
+  if command -v sha256sum >/dev/null 2>&1; then
+    hash_file() { sha256sum "$1" | awk '{print $1}'; }
+  elif command -v shasum >/dev/null 2>&1; then
+    hash_file() { shasum -a 256 "$1" | awk '{print $1}'; }
+  else
+    fail E_DOWNLOAD_TOOL "sha256sum or shasum is required for --verify-downloads"
+  fi
+
+  download_dir=$(mktemp -d "${TMPDIR:-/tmp}/prime-toolchain-download.XXXXXX") ||
+    fail E_DOWNLOAD_TEMP "cannot create temporary download directory"
+  trap 'rm -rf "$download_dir"' EXIT HUP INT TERM
+
+  curl -fsSL "$RELEASE_BASE_URL/latest.json" -o "$download_dir/latest.json" ||
+    fail E_DOWNLOAD_FETCH "could not download latest.json"
+  node - "$download_dir/latest.json" > "$download_dir/latest.tsv" <<'NODE' ||
+const fs = require("node:fs");
+const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(data.tarballs) || data.tarballs.length !== 4) process.exit(1);
+for (const item of data.tarballs) {
+  if (
+    typeof item.package !== "string" ||
+    typeof item.file !== "string" ||
+    !/^[0-9a-f]{64}$/.test(item.sha256)
+  ) process.exit(1);
+  process.stdout.write(`${item.package}\t${item.file}\t${item.sha256}\n`);
+}
+NODE
+    fail E_DOWNLOAD_PROVENANCE "latest.json has an invalid tarballs array"
+
+  count=0
+  while IFS="$(printf '\t')" read -r package file published_hash; do
+    count=$((count + 1))
+    manifest_hash=$(awk -v name="$file" '$2 == name { print $1 }' "$TOOLCHAIN_DIR/SHA256SUMS")
+    [ -n "$manifest_hash" ] ||
+      fail E_DOWNLOAD_PROVENANCE "$file is absent from toolchain/SHA256SUMS"
+    [ "$published_hash" = "$manifest_hash" ] ||
+      fail E_DOWNLOAD_PROVENANCE "latest.json disagrees with toolchain/SHA256SUMS for $file"
+    curl -fsSL "$RELEASE_BASE_URL/$file" -o "$download_dir/$file" ||
+      fail E_DOWNLOAD_FETCH "could not download $file"
+    actual_hash=$(hash_file "$download_dir/$file")
+    [ "$actual_hash" = "$manifest_hash" ] ||
+      fail E_DOWNLOAD_CHECKSUM "$file expected $manifest_hash, got $actual_hash"
+    printf 'artifact=%s package=%s state=verified\n' "$file" "$package"
+  done < "$download_dir/latest.tsv"
+  [ "$count" -eq 4 ] ||
+    fail E_DOWNLOAD_PROVENANCE "expected four release tarballs, found $count"
+  rm -rf "$download_dir"
+  trap - EXIT HUP INT TERM
+}
+
+case "${1-}" in
+  "")
+    ;;
+  --verify-downloads)
+    [ "$#" -eq 1 ] || fail E_USAGE "usage: bootstrap-toolchain [--verify-downloads]"
+    verify_downloads
+    exit 0
+    ;;
+  *)
+    fail E_USAGE "usage: bootstrap-toolchain [--verify-downloads]"
+    ;;
+esac
+
+verify_lock || fail E_LOCK_INTEGRITY "toolchain lockfile is incomplete or inconsistent"
+
+mkdir -p "$AGENT_DIR" "$KERNEL_VENV"
+export PRIME_AGENT_CODING_AGENT_DIR=$AGENT_DIR
+export PRIME_AGENT_KERNEL_VENV=$KERNEL_VENV
+export PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1
+export PRIME_AGENT_BOOTSTRAP_TOOLS_ON_INSTALL=1
+
+npm ci --prefix "$TOOLCHAIN_DIR" ||
+  fail E_NPM_INSTALL "npm ci failed"
+
+installed_manifest=$TOOLCHAIN_DIR/node_modules/prime-agent/package.json
+node - "$installed_manifest" <<'NODE' ||
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (manifest.name !== "prime-agent") process.exit(1);
+if (manifest.version !== "0.8.1") process.exit(2);
+if (manifest.engines?.node !== ">=22.8.0") process.exit(3);
+if (manifest.bin?.["prime-agent"] !== "dist/bundle/cli.js") process.exit(4);
+NODE
+  fail E_PACKAGE_IDENTITY "installed package is not prime-agent 0.8.1"
+
+prime_binary=$TOOLCHAIN_DIR/node_modules/.bin/prime-agent
+[ -x "$prime_binary" ] ||
+  fail E_PACKAGE_BINARY "installed prime-agent binary is not executable: $prime_binary"
+prime_version=$("$prime_binary" --version 2>/dev/null) ||
+  fail E_PACKAGE_BINARY "installed prime-agent --version failed"
+[ "$prime_version" = "0.8.1" ] ||
+  fail E_PACKAGE_IDENTITY "prime-agent --version expected 0.8.1, got $prime_version"
+
+python=$KERNEL_VENV/bin/python
+[ -x "$python" ] ||
+  fail E_KERNEL_MISSING "kernel Python is not executable: $python"
+"$python" -c 'import IPython, rlm' >/dev/null 2>&1 ||
+  fail E_KERNEL_MISSING "kernel Python cannot import IPython and rlm: $python"
+
+verify_tool() {
+  tool=$1
+  alternate=${2-}
+  candidate=$AGENT_DIR/bin/$tool
+  if [ -x "$candidate" ] && "$candidate" --version >/dev/null 2>&1; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  candidate=$(command -v "$tool" 2>/dev/null || :)
+  if [ -z "$candidate" ] && [ -n "$alternate" ]; then
+    candidate=$(command -v "$alternate" 2>/dev/null || :)
+  fi
+  [ -n "$candidate" ] && [ -x "$candidate" ] &&
+    "$candidate" --version >/dev/null 2>&1 || return 1
+  printf '%s\n' "$candidate"
+}
+
+rg_path=$(verify_tool rg) || fail E_TOOL_MISSING "rg is not executable"
+fd_path=$(verify_tool fd fdfind) || fail E_TOOL_MISSING "fd is not executable"
+
+printf 'toolchain=prime-agent version=0.8.1 state=verified\n'
+printf 'tool=python path=%s state=verified\n' "$python"
+printf 'tool=rg path=%s state=verified\n' "$rg_path"
+printf 'tool=fd path=%s state=verified\n' "$fd_path"
