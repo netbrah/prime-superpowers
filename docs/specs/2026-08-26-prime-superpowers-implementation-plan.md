@@ -1,8 +1,14 @@
 # Prime Superpowers CLI Implementation Plan
 
-Status: draft, round 2 findings incorporated
+Status: accepted for execution after a single-pass repair of round-3 findings
 
 Design source: `docs/specs/2026-08-26-prime-superpowers-design.md`
+
+Open findings register: `docs/specs/open-findings.md`
+
+**Gate posture.** The zero-Blocker/zero-Major plan gate was deliberately relaxed after design round 6 to avoid livelock in review iteration. This plan received one bounded repair pass covering execution-blocking defects only: Task 8's incomplete `Files` manifest, Task 15's nonexistent `model list --json` oracle, the missing `E_PACKAGE_UNRESOLVED` emitter, unfrozen cross-batch interfaces, and non-disjoint batch partitioning. Every remaining finding is recorded in the register with an owning task and the evidence required to close it. Findings are resolved at implementation time against real evidence rather than by further review rounds.
+
+**Phase 2 execution model.** Tasks 0 and 1 run sequentially, then Batches A, B, and C run in parallel with **no per-task review gate**, then Tasks 15-18 run sequentially. One tri-model review covers the entire implementation at the end and must also adjudicate the register.
 
 ## Execution contract
 
@@ -13,7 +19,7 @@ Design source: `docs/specs/2026-08-26-prime-superpowers-design.md`
 - Red/green evidence records command, cwd, start/end timestamps, exit status, named failing subtest, stable failure substring, output-artifact path, and pre/post commit and tree hashes.
 - After green, record `HEAD`, build `BASE..HEAD`, and dispatch the sealed primary reviewer. Ordinary tasks also receive one cross-family reviewer. Protocol, security, persistence, and concurrency tasks receive Sol, Opus, and Gemini seats with an implementer outside the sealed Sol seat.
 - Review rounds are a loop with fresh reviewers and revised immutable ranges. The cap is five rounds; rounds four and five use frontier tiers. A Blocker/Major downgrade requires written concurrence from another family. A nonzero round-five result stops for the operator.
-- Extend `tests/test-package.sh` in the same task that introduces a package-owned path.
+- Declare package-owned paths by writing `tests/package-manifest.d/<NN>-<name>.sh` in the same task that introduces them. Never edit `tests/test-package.sh` after Task 1; it is a fixed driver, and a shared append target would make parallel batches conflict.
 - No task may modify paths outside its `Files` list. A new dependency requires a plan amendment and fresh plan review.
 - Do not push, merge, release, or delete worktrees during implementation.
 
@@ -25,7 +31,11 @@ Task 1 creates `scripts/gate`; it discovers existing files by shebang/extension,
 scripts/gate
 ```
 
-The gate always runs `git diff --check`, `bash tests/test-package.sh`, shell syntax over existing POSIX shell files, and `node --test` over existing `tests/*.test.mjs`. It runs toolchain identity tests only after Task 1, launcher tests after Task 4, and later suites from the task that introduces them. Absence before introduction is skipped; absence after introduction is a failure. `toolchain/package.json` has no decorative `test` script, and the gate does not call `npm test --prefix toolchain`.
+The gate always runs `git diff --check`, `bash tests/test-package.sh`, shell syntax over existing POSIX shell files, and `node --test` over existing `tests/*.test.mjs`.
+
+`tests/test-package.sh` is created once in Task 1 and never modified again. It is a driver that sources every `tests/package-manifest.d/*.sh` fragment in sorted order and emits their TAP assertions under one plan count. Each fragment declares only the paths its own task introduces, so every task writes exactly one file that no other task touches. A fragment that references a path outside its task's `Files` list is a gate failure.
+
+The gate runs toolchain identity tests only after Task 1, launcher tests after Task 4, and later suites from the task that introduces them. Absence before introduction is skipped; absence after introduction is a failure. `toolchain/package.json` has no decorative `test` script, and the gate does not call `npm test --prefix toolchain`.
 
 ## Model profile fixture
 
@@ -52,6 +62,77 @@ The three provider fixtures are literal objects with exactly `id`, `name`, `api`
 ## Accepted layout amendment
 
 This plan is the exact implementation file manifest and supersedes the design document's illustrative repository tree. The added `lib/` modules separate pure, testable policy from shell adapters; `scripts/gate`, `LICENSE`, `.gitignore`, `UPSTREAM.md`, fixtures, and CI are package-support files. The provider test is consistently named `tests/provider-config.test.mjs`. No provider, runtime, skill-precedence, worktree, or SDD architecture changes.
+
+## Parallel batch partition
+
+Phase 2 runs as three batches in parallel with no per-task review gate. A single tri-model review covers the whole implementation at the end. Parallel safety depends entirely on the batches owning disjoint file sets, so the partition below is normative: a task may not touch a path owned by another batch, and discovering that it needs to is a stop-and-amend condition, not a judgment call.
+
+Tasks 0 and 1 run **sequentially before** the batches, because every batch depends on the worktree, the gate, and the `tests/test-package.sh` driver.
+
+| Batch | Tasks (sequential within the batch) | Owned paths |
+| --- | --- | --- |
+| **A — launcher chain** | 4, 5, 6, 7, 8 | `prime`, `prime.cmd`, `lib/launcher-process.mjs`, `lib/argv-firewall.mjs`, `lib/worktree.mjs`, `lib/run-registry.mjs`, `lib/launcher.mjs`, `scripts/install-superpowers-package` |
+| **B — configuration and workflow core** | 2, 11, 12, 13, 14 | `lib/config.mjs`, `lib/workflow-state.mjs`, `lib/ledger.mjs`, `lib/policy-history.mjs`, `lib/workflow-controller.mjs`, `scripts/workflow-controller` |
+| **C — agent home and skills** | 3, 9, 10 | `agent-home/**`, `UPSTREAM.md` |
+
+Each task additionally owns its own `tests/<name>.test.mjs`, its own `tests/fixtures/<name>/` directory, and exactly one `tests/package-manifest.d/<NN>-<name>.sh` fragment. Those are disjoint by construction.
+
+Tasks 15, 16, 17, and 18 run **sequentially after** all three batches converge. Tasks 15-17 are the runtime proofs and must be serial: they execute the real Prime binary, bind ports, and write shared artifact directories.
+
+**Verifying disjointness is a gate, not a hope.** Before dispatching the batches, assert that the union of Batch A, B, and C `Files` lists contains no duplicate path and no path that is a prefix of a path in another batch. Re-run the same assertion on the merged result.
+
+## Frozen cross-batch interfaces
+
+Batches cannot see each other's work in progress, so every value crossing a batch boundary is fixed here. An implementer writes to this contract, not to whatever the neighboring batch happens to produce. Deviating requires a plan amendment.
+
+### `lib/config.mjs` — produced by Batch B (Task 2), consumed by Batch A (Task 8) and Task 15
+
+```js
+export function loadConfig({ kitRoot, targetRoot, env }): {
+  providers: Array<{ id, baseUrl, dialect, authMode, headers }>,
+  models: Array<{ selector, provider, modelId, thinking }>,
+  protectedViolations: string[],   // non-empty means fail closed
+}
+export function generateModelsJson(config): object   // exact object written to <runtime-home>/models.json
+export const PROTECTED_VARIABLES: string[]           // includes PRIME_AGENT_CODING_AGENT_DIR,
+                                                     // PRIME_AGENT_SESSION_DIR and its legacy name
+```
+
+`loadConfig` is pure: it reads no process state and performs no I/O beyond the paths it is handed. Task 8 calls `generateModelsJson` and writes the result verbatim; it never constructs model JSON itself.
+
+### Runtime home layout — produced by Batch A (Task 8), consumed by Batch C and Task 15
+
+Batch C authors the template; Batch A composes it. The composed layout is exactly:
+
+```text
+<kit>/.state/runs/<run-id>/agent-home/
+  settings.json  AGENTS.md  extensions/  skills/     # copied from template (Batch C)
+  models.json                                        # generated via lib/config.mjs (Batch B)
+  git/github.com/obra/superpowers -> <cache entry>   # symlink at Prime's computed leaf
+  resources.lock.json                                # launcher-generated manifest
+  auth.json  sessions/  logs/  harness/              # Prime-owned
+  daemon/daemon.sock                                 # per-run socket, passed explicitly
+```
+
+Batch C must not assume any path outside the first line exists in the committed template.
+
+### Controller CLI contract — implemented by Batch B (Task 14), referenced by Batch C (Task 10)
+
+Task 10's skill documents instruct agents to invoke exactly these commands. Task 14 implements exactly these commands.
+
+```text
+scripts/workflow-controller admit   --task <id> --model <selector> --json
+scripts/workflow-controller report  --child <id> --status <ok|fail> --json
+scripts/workflow-controller status  --json
+```
+
+`admit` exits `0` on admission. It exits non-zero with a machine-readable `code` field on refusal; the frozen codes are `E_DEPTH_SOURCE` (observed depth source is not kit global settings), `E_DEPTH_VALUE` (observed depth is not one), `E_DAEMON_UNREACHABLE` (handshake failed, session replaced, or identity mismatch), and `E_CONTROLLER_REQUIRED` (dispatch attempted outside the controller). All are fail-closed.
+
+The controller reads the per-run daemon socket path and the parent session identity from the run record written by Task 8; it must not read `RLM_MAX_DEPTH` from the kernel environment, which is numeric-only and documented in Prime's own source as possibly stale.
+
+### Ledger record — produced by Batch B (Task 12), read by Batch A (Task 8) `status`
+
+Append-only JSONL at `<kit>/.state/runs/<run-id>/ledger.jsonl`. Every record carries `{ ts, runId, taskId, event, detail }`. Task 8's `status` reads this file and must tolerate unknown `event` values rather than failing on them.
 
 ## Task and review matrix
 
@@ -90,7 +171,9 @@ This plan is the exact implementation file manifest and supersedes the design do
 
 **Depends on:** Task 0.
 
-**Files:** `.gitignore`, `LICENSE`, `toolchain/package.json`, `toolchain/package-lock.json`, `toolchain/SHA256SUMS`, `scripts/bootstrap-toolchain`, `scripts/gate`, `tests/toolchain.test.mjs`, `tests/gate.test.mjs`, `tests/test-package.sh`, `tests/fixtures/toolchain/`, `tests/fixtures/gate/`.
+**Files:** `.gitignore`, `LICENSE`, `toolchain/package.json`, `toolchain/package-lock.json`, `toolchain/SHA256SUMS`, `scripts/bootstrap-toolchain`, `scripts/gate`, `tests/test-package.sh`, `tests/package-manifest.d/01-skeleton.sh`, `tests/toolchain.test.mjs`, `tests/gate.test.mjs`, `tests/fixtures/toolchain/`, `tests/fixtures/gate/`.
+
+This is the only task that creates `tests/test-package.sh`. It must be written as a fixed driver that sources `tests/package-manifest.d/*.sh` in sorted order, counts the assertions they register, and emits a single TAP plan. No later task modifies it.
 
 **Red:**
 
@@ -118,7 +201,7 @@ The absence red runs the named subtest `bootstrap rejects unsupported Node` befo
 
 **Depends on:** Task 1.
 
-**Files:** `lib/config.mjs`, `tests/provider-config.test.mjs`, `tests/fixtures/model-profiles.json`, `tests/fixtures/env/`, `tests/test-package.sh`.
+**Files:** `lib/config.mjs`, `tests/provider-config.test.mjs`, `tests/fixtures/model-profiles.json`, `tests/fixtures/env/`, `tests/package-manifest.d/02-config.sh`.
 
 **Red:**
 
@@ -144,7 +227,9 @@ First red is exact module absence. Behavioral red is named `derives three native
 
 **Depends on:** Task 2.
 
-**Files:** `agent-home/extensions/prime-superpowers.js`, `agent-home/settings.json`, `agent-home/AGENTS.md`, `agent-home/prompts/coordinator.md`, `agent-home/prompts/child.md`, `agent-home/resources.lock.json`, `tests/extension.test.mjs`, `tests/fixtures/extension-api.mjs`, `tests/test-package.sh`.
+**Files:** `agent-home/extensions/prime-superpowers.js`, `agent-home/settings.json`, `agent-home/AGENTS.md`, `agent-home/prompts/coordinator.md`, `agent-home/prompts/child.md`, `tests/extension.test.mjs`, `tests/fixtures/extension-api.mjs`, `tests/package-manifest.d/03-extension.sh`.
+
+`resources.lock.json` is **not** committed here. Per the amended design it is a launcher-generated manifest written into the per-run runtime home by Task 8; committing a template copy would be a second, divergent source of truth.
 
 **Red:**
 
@@ -171,7 +256,7 @@ First red is exact module absence. Behavioral red is `before_agent_start selects
 
 **Depends on:** Tasks 1 and 3.
 
-**Files:** `prime`, `prime.cmd`, `lib/launcher-process.mjs`, `tests/launcher-process.test.mjs`, `tests/fixtures/bin/fake-prime`, `tests/test-package.sh`.
+**Files:** `prime`, `prime.cmd`, `lib/launcher-process.mjs`, `tests/launcher-process.test.mjs`, `tests/fixtures/bin/fake-prime`, `tests/package-manifest.d/04-launcher-process.sh`.
 
 **Red:**
 
@@ -195,7 +280,7 @@ First red is exact module absence. Behavioral red is `preflight precedes credent
 
 **Depends on:** Task 4.
 
-**Files:** `lib/argv-firewall.mjs`, `tests/argv-firewall.test.mjs`, `tests/test-package.sh`.
+**Files:** `lib/argv-firewall.mjs`, `tests/argv-firewall.test.mjs`, `tests/package-manifest.d/05-argv-firewall.sh`.
 
 **Red:**
 
@@ -219,7 +304,7 @@ First red is exact module absence. Behavioral red is `rejects public command in 
 
 **Depends on:** Task 5.
 
-**Files:** `lib/worktree.mjs`, `tests/worktree.test.mjs`, `tests/fixtures/git/`, `tests/test-package.sh`.
+**Files:** `lib/worktree.mjs`, `tests/worktree.test.mjs`, `tests/fixtures/git/`, `tests/package-manifest.d/06-worktree.sh`.
 
 **Red:**
 
@@ -243,7 +328,7 @@ First red is exact module absence. Behavioral red is `creates run branch before 
 
 **Depends on:** Task 6.
 
-**Files:** `lib/run-registry.mjs`, `tests/run-registry.test.mjs`, `tests/fixtures/run-registry/`, `tests/test-package.sh`.
+**Files:** `lib/run-registry.mjs`, `tests/run-registry.test.mjs`, `tests/fixtures/run-registry/`, `tests/package-manifest.d/07-run-registry.sh`.
 
 **Red:**
 
@@ -264,9 +349,11 @@ The import red is `ERR_MODULE_NOT_FOUND` for `lib/run-registry.mjs`. The fail-cl
 
 ## Task 8: Composed launcher controller and immutable runtime agent home
 
-**Depends on:** Tasks 3-7.
+**Depends on:** Tasks 4-7 (same batch, sequential). Its dependency on Task 3's `agent-home/` template is **contract-only** and does not serialize against Batch C: build and test against `tests/fixtures/launcher/template/`, a fixture template conforming to the frozen runtime home layout. Its dependency on `lib/config.mjs` is likewise contract-only via the frozen `generateModelsJson` signature; stub it in this task's tests.
 
-**Files:** `lib/launcher.mjs`, `scripts/install-superpowers-package`, `tests/launcher.test.mjs`, `tests/fixtures/bin/fake-prime-session`, `tests/fixtures/launcher/`, `tests/test-package.sh`.
+**Files:** `lib/launcher.mjs`, `scripts/install-superpowers-package`, `prime`, `lib/launcher-process.mjs`, `tests/launcher.test.mjs`, `tests/fixtures/bin/fake-prime-session`, `tests/fixtures/launcher/`, `tests/package-manifest.d/08-launcher.sh`.
+
+`prime` and `lib/launcher-process.mjs` are listed because green behavior below replaces Task 4's `E_NOT_COMPOSED` branch inside them. Both are Batch A paths, so this task owns them at this point in the batch sequence.
 
 **Red:**
 
@@ -279,8 +366,11 @@ The import red is `ERR_MODULE_NOT_FOUND` for `lib/launcher.mjs`. The fail-closed
 **Green behavior:**
 
 - Export `run`, `attach`, `status`, and `stop` and compose the previously tested process, firewall, worktree, and registry interfaces without duplicating their policy.
-- For each run, copy the committed `agent-home/` template byte-for-byte into ignored `.state/runs/<run-id>/agent-home`, set `PRIME_AGENT_CODING_AGENT_DIR` to that copy, and prove the tracked template remains byte-identical after a simulated session write.
-- Before spawn, install/resolve the pinned Superpowers package into the runtime agent home and verify the minimum effective skill set `brainstorming`, `verification-before-completion`, and `requesting-code-review`. Missing, offline, or silently skipped resolution fails with `E_PACKAGE_UNRESOLVED`.
+- For each run, materialize `.state/runs/<run-id>/agent-home` in a temporary directory and atomically rename it into place: copy the committed `agent-home/` template regular files byte-for-byte, generate `models.json`, create the package symlink, and write `resources.lock.json`. Set `PRIME_AGENT_CODING_AGENT_DIR` to that path and prove the tracked template remains byte-identical after a simulated session write. Copy regular files only and fail closed if the template contains a symlink.
+- Pass an explicit per-run daemon socket under the run directory on every spawn and on `attach`, `status`, and `stop`, because Prime's default socket is process-global and would let two runs share one daemon. Record the socket path in the run record. Strip `PRIME_AGENT_SESSION_DIR` and its legacy equivalent from the child environment and refuse to start if a template or target setting sets `sessionDir`.
+- Link the shared package cache entry at the exact leaf Prime computes for the declared source, `<runtime-home>/git/github.com/obra/superpowers`, creating parent directories. Derive the leaf from the declared source rather than hardcoding it and assert the computed leaf equals the link created.
+- **This task is the sole emitter of `E_PACKAGE_UNRESOLVED`.** Before Prime is spawned, verify the cache entry exists and its recomputed digest matches the recorded digest, and verify the minimum effective skill set `brainstorming`, `verification-before-completion`, and `requesting-code-review` is present in the linked tree. Any failure exits non-zero with `E_PACKAGE_UNRESOLVED` and Prime is never spawned. Prime is never relied upon to report the condition, because its resolver deliberately continues with a reduced resource set.
+- Write `resources.lock.json` covering every immutable input: per-file digests of copied template files, the digest of the generated `models.json`, the literal symlink text, and the canonical resolved target plus its full tree digest. Require current-user ownership and owner-only permissions on `.state`, the run directory, and every parent component. Recompute and compare the full manifest on `attach`, `status`, and `stop`; a divergent runtime home is `orphaned`, never silently rebuilt.
 - Reject any runtime agent-home copy whose effective settings do not contain `rlmMaxDepth: 1`, the pinned package, and `extensions: []`; reject a retained session containing an effective depth override other than one.
 - Preserve the exact parent session for attach/status/stop, refuse duplicate live coordinators, and propagate child exit status and signals.
 - Replace Task 4's `E_NOT_COMPOSED` entry-point branch with calls to this controller. Wrapper-owned `run`, `attach`, `status`, and `stop` are consumed before Prime sees argv.
@@ -291,7 +381,7 @@ The import red is `ERR_MODULE_NOT_FOUND` for `lib/launcher.mjs`. The fail-closed
 
 **Depends on:** Task 3.
 
-**Files:** `agent-home/skills/using-superpowers/`, `agent-home/skills/subagent-driven-development/`, `UPSTREAM.md`, `tests/skills-vendor.test.mjs`, `tests/fixtures/plans/minimal.md`, `tests/test-package.sh`.
+**Files:** `agent-home/skills/using-superpowers/`, `agent-home/skills/subagent-driven-development/`, `UPSTREAM.md`, `tests/skills-vendor.test.mjs`, `tests/fixtures/plans/minimal.md`, `tests/package-manifest.d/09-skills-vendor.sh`.
 
 **Red:**
 
@@ -316,7 +406,9 @@ First red is exact missing directory. Behavioral red is `all overriding-skill re
 
 **Depends on:** Tasks 3 and 9.
 
-**Files:** `agent-home/skills/using-superpowers/SKILL.md`, `agent-home/skills/subagent-driven-development/SKILL.md`, `agent-home/skills/subagent-driven-development/implementer-prompt.md`, `agent-home/skills/subagent-driven-development/task-reviewer-prompt.md`, `agent-home/skills/subagent-driven-development/re-review-prompt.md`, `agent-home/skills/subagent-driven-development/final-reviewer-prompt.md`, `agent-home/skills/prime-rlm-dispatch/SKILL.md`, `agent-home/skills/prime-rlm-dispatch/worker-prompt.md`, `agent-home/skills/prime-rlm-dispatch/reviewer-prompt.md`, `agent-home/skills/model-policy/SKILL.md`, `agent-home/skills/model-policy/novelty-prompt.md`, `agent-home/resources.lock.json`, `tests/workflow-contract.test.mjs`, `tests/test-package.sh`.
+**Files:** `agent-home/skills/using-superpowers/SKILL.md`, `agent-home/skills/subagent-driven-development/SKILL.md`, `agent-home/skills/subagent-driven-development/implementer-prompt.md`, `agent-home/skills/subagent-driven-development/task-reviewer-prompt.md`, `agent-home/skills/subagent-driven-development/re-review-prompt.md`, `agent-home/skills/subagent-driven-development/final-reviewer-prompt.md`, `agent-home/skills/prime-rlm-dispatch/SKILL.md`, `agent-home/skills/prime-rlm-dispatch/worker-prompt.md`, `agent-home/skills/prime-rlm-dispatch/reviewer-prompt.md`, `agent-home/skills/model-policy/SKILL.md`, `agent-home/skills/model-policy/novelty-prompt.md`, `tests/workflow-contract.test.mjs`, `tests/package-manifest.d/10-workflow-contract.sh`.
+
+This task writes the **final** text of `prime-rlm-dispatch/SKILL.md` and `subagent-driven-development/SKILL.md`, including their references to the controller. It writes those references against the frozen controller CLI contract below, so Task 14 does not need to reopen these files. `resources.lock.json` is runtime-generated by Task 8 and is not committed.
 
 **Red:**
 
@@ -341,7 +433,7 @@ First red is exact skill absence. Behavioral red is `dispatch contract requires 
 
 **Depends on:** Tasks 7 and 10.
 
-**Files:** `lib/workflow-state.mjs`, `tests/workflow-state.test.mjs`, `tests/test-package.sh`.
+**Files:** `lib/workflow-state.mjs`, `tests/workflow-state.test.mjs`, `tests/package-manifest.d/11-workflow-state.sh`.
 
 **Red:** `node --test tests/workflow-state.test.mjs` first fails with `ERR_MODULE_NOT_FOUND`. With the fail-closed stub, `timed-out attempt cannot be retried before cancellation tombstone` fails with `expected E_CLEANUP_UNCONFIRMED, got retry admitted`.
 
@@ -353,7 +445,7 @@ First red is exact skill absence. Behavioral red is `dispatch contract requires 
 
 **Depends on:** Task 11.
 
-**Files:** `lib/ledger.mjs`, `tests/ledger.test.mjs`, `tests/fixtures/ledger/`, `tests/test-package.sh`.
+**Files:** `lib/ledger.mjs`, `tests/ledger.test.mjs`, `tests/fixtures/ledger/`, `tests/package-manifest.d/12-ledger.sh`.
 
 **Red:** `node --test tests/ledger.test.mjs` first fails with `ERR_MODULE_NOT_FOUND`. With the fail-closed stub, `ledger rejects incomplete red green evidence` fails with `expected E_EVIDENCE_INCOMPLETE for missing post_tree_hash, got append accepted`.
 
@@ -365,7 +457,7 @@ First red is exact skill absence. Behavioral red is `dispatch contract requires 
 
 **Depends on:** Task 12.
 
-**Files:** `lib/policy-history.mjs`, `tests/policy-history.test.mjs`, `tests/fixtures/policy-history/`, `tests/test-package.sh`.
+**Files:** `lib/policy-history.mjs`, `tests/policy-history.test.mjs`, `tests/fixtures/policy-history/`, `tests/package-manifest.d/13-policy-history.sh`.
 
 **Red:** `node --test tests/policy-history.test.mjs` first fails with `ERR_MODULE_NOT_FOUND`. With the fail-closed stub, `later-seat unique finding is not credited to sealed primary` fails with `expected seat=gemini, got seat=sol`.
 
@@ -375,9 +467,11 @@ First red is exact skill absence. Behavioral red is `dispatch contract requires 
 
 ## Task 14: Shipped workflow controller adapter
 
-**Depends on:** Tasks 8 and 10-13.
+**Depends on:** Tasks 11-13 (same batch, sequential). Its dependency on Task 8's run record is **contract-only** and does not serialize against Batch A: read the daemon socket path and parent session identity from the frozen run-record fields, and test against a fixture run record under `tests/fixtures/workflow-controller/`. Its relationship to Task 10 is the frozen controller CLI contract, asserted from both sides.
 
-**Files:** `lib/workflow-controller.mjs`, `scripts/workflow-controller`, `agent-home/skills/prime-rlm-dispatch/SKILL.md`, `agent-home/skills/subagent-driven-development/SKILL.md`, `tests/workflow-controller.test.mjs`, `tests/fixtures/workflow-controller/`, `tests/test-package.sh`.
+**Files:** `lib/workflow-controller.mjs`, `scripts/workflow-controller`, `tests/workflow-controller.test.mjs`, `tests/fixtures/workflow-controller/`, `tests/package-manifest.d/14-workflow-controller.sh`.
+
+The two skill documents previously listed here are owned by Task 10, which writes them against the frozen controller CLI contract. This task implements that contract and must not edit `agent-home/`; a mismatch between them is a contract violation caught by `tests/workflow-contract.test.mjs`, not fixed by editing the skill text.
 
 **Red:** `node --test tests/workflow-controller.test.mjs` first fails with `ERR_MODULE_NOT_FOUND`. With the fail-closed stub, `dispatch is denied when admission ledger and lifecycle checks are bypassed` fails with `expected E_CONTROLLER_REQUIRED, got child admitted`.
 
@@ -394,16 +488,19 @@ First red is exact skill absence. Behavioral red is `dispatch contract requires 
 
 **Depends on:** Tasks 1-14.
 
-**Files:** `scripts/doctor`, `lib/doctor.mjs`, `tests/doctor.test.mjs`, `tests/prime-runtime.test.mjs`, `tests/fixtures/doctor/`, `tests/fixtures/runtime-target/`, `tests/test-package.sh`.
+**Files:** `scripts/doctor`, `lib/doctor.mjs`, `tests/doctor.test.mjs`, `tests/prime-runtime.test.mjs`, `tests/fixtures/doctor/`, `tests/fixtures/runtime-target/`, `tests/package-manifest.d/15-doctor.sh`.
 
 **Red:** `node --test tests/doctor.test.mjs tests/prime-runtime.test.mjs`. The doctor import first fails with `ERR_MODULE_NOT_FOUND`; its stub fails `static doctor passes structural checks without proxy secrets` with `expected exit 0, got E_MISSING_KEY`. The real-runtime behavioral red is `real Prime lists prime-proxy-openai model` with `selector prime-proxy-openai/gpt-5.6-sol not found`.
+
+**Oracle correction:** Prime 0.8.1 has no `--json` output for model listing. `--list-models` was removed and now rewrites to the public nested command `model list [search]` (`packages/coding-agent/src/cli/public-command.ts:142`, `packages/coding-agent/src/cli/args.ts:275-291`). `listModels` prints a **human-readable table** with columns `provider`, `model`, `context`, `maxOut`, `thinking`, `images` and has no JSON mode (`packages/coding-agent/src/cli/list-models.ts:19-60`). Assertions therefore parse that table, not JSON.
 
 **Green behavior:**
 
 - Static doctor verifies Node/npm, toolchain identity, executable kernel/`rg`/`fd`, extension discovery filename, immutable template, runtime-copy settings, provider roots/auth/model selectors, skills/provenance/minimum package resources, protected variables, and executable bits. Missing proxy secrets are notices; `--live` requires them.
 - `--verify-downloads` invokes Task 1's network checksum path. Diagnostics distinguish prerequisite, unresolved package, unauthorized, path/dialect mismatch, missing model, unsupported effort, effective-depth override, tracked-template drift, and corrupt state without exposing keys.
-- In a temporary git target, run the absolute checksum/lock-verified Prime 0.8.1 binary with sentinel environment and a per-run agent-home copy. Exact command: `env PRIME_AGENT_CODING_AGENT_DIR="$RUN_HOME" PRIME_AGENT_TELEMETRY=off PI_CACHE_RETENTION=long "$PRIME_BIN" model list --json`.
-- Require exit 0 within 60 seconds; save stdout/stderr and effective resource inventory under `tests/.artifacts/prime-runtime/<case>/`. Assert all five selectors, package minimum skills, local override winners, filtered package extensions, root worktree cwd, and tracked template byte identity. Remove the package cache and deny network in the negative case; require `E_PACKAGE_UNRESOLVED`, not a silent reduced session.
+- In a temporary git target, run the absolute checksum/lock-verified Prime 0.8.1 binary with sentinel environment and a per-run agent-home copy. Exact command: `env PRIME_AGENT_CODING_AGENT_DIR="$RUN_HOME" PRIME_AGENT_TELEMETRY=off PI_CACHE_RETENTION=long NO_COLOR=1 "$PRIME_BIN" model list`. `NO_COLOR=1` is required because the table is chalk-colored and ANSI codes would break column parsing.
+- Require exit 0 within 60 seconds; save stdout/stderr and effective resource inventory under `tests/.artifacts/prime-runtime/<case>/`. Assert that each of the five selectors appears as a `provider`/`model` row pair in the parsed table, and assert stderr contains no `Warning: errors loading models.json` line, which is how the registry reports a malformed generated profile. Assert package minimum skills, local override winners, filtered package extensions, root worktree cwd, and tracked template byte identity.
+- Negative case: remove the package cache entry and deny network. Assert the **launcher** exits non-zero with `E_PACKAGE_UNRESOLVED` before Prime is spawned, and assert no Prime process was started. A reduced-but-successful Prime session is a failure of this assertion, not a pass.
 
 **Acceptance:** `node --test tests/doctor.test.mjs tests/prime-runtime.test.mjs`; `scripts/doctor`; `scripts/gate`.
 
@@ -411,7 +508,7 @@ First red is exact skill absence. Behavioral red is `dispatch contract requires 
 
 **Depends on:** Task 15.
 
-**Files:** `tests/wire-probe.test.mjs`, `tests/fixtures/mock-proxy.mjs`, `tests/fixtures/wire-responses/`, `tests/test-package.sh`.
+**Files:** `tests/wire-probe.test.mjs`, `tests/fixtures/mock-proxy.mjs`, `tests/fixtures/wire-responses/`, `tests/package-manifest.d/16-wire-probe.sh`.
 
 **Red:** `node --test tests/wire-probe.test.mjs` first fails at `Sol uses OpenAI Responses native path` with `expected POST /v1/responses, got no request`. The fixture must already start and emit a valid terminating response, so server/bootstrap errors do not count.
 
@@ -427,7 +524,7 @@ First red is exact skill absence. Behavioral red is `dispatch contract requires 
 
 **Depends on:** Tasks 14-16.
 
-**Files:** `tests/rlm-runtime.test.mjs`, `tests/fixtures/rlm-scripted-proxy.mjs`, `tests/fixtures/rlm-responses/`, `tests/test-package.sh`.
+**Files:** `tests/rlm-runtime.test.mjs`, `tests/fixtures/rlm-scripted-proxy.mjs`, `tests/fixtures/rlm-responses/`, `tests/package-manifest.d/17-rlm-runtime.sh`.
 
 **Red:** `node --test tests/rlm-runtime.test.mjs` starts the real installed kernel and scripted proxy, then fails at `child receives universal prompt and inherited worktree cwd` with `expected CHILD_CONTRACT and <worktree>, got no child report`. Missing Python/IPython/`rg`/`fd` is a Task 1 regression, not a skip.
 
@@ -444,9 +541,9 @@ First red is exact skill absence. Behavioral red is `dispatch contract requires 
 
 **Depends on:** Tasks 1-17.
 
-**Files:** `README.md`, `.env.example`, `AGENTS.md`, `.github/workflows/ci.yml`, `UPSTREAM.md`, `docs/reviews/README.md`, `docs/reviews/outcome-kit-build.md`, `tests/test-package.sh`, `.state/policy-history.jsonl` during the run only.
+**Files:** `README.md`, `.env.example`, `AGENTS.md`, `.github/workflows/ci.yml`, `docs/reviews/README.md`, `docs/reviews/outcome-kit-build.md`, `tests/package-manifest.d/18-docs-ci.sh`, `.state/policy-history.jsonl` during the run only.
 
-**Red:** Add TAP assertions to `tests/test-package.sh` first, then run it. The exact first failure is `not ok required operator document README.md`; analogous named missing-deliverable failures follow. Generic shell/glob failures do not count.
+**Red:** Add TAP assertions to `tests/package-manifest.d/18-docs-ci.sh` first, then run `bash tests/test-package.sh`. The exact first failure is `not ok required operator document README.md`; analogous named missing-deliverable failures follow. Generic shell/glob failures do not count.
 
 **Green behavior:**
 
