@@ -69,6 +69,42 @@ Phase 2 runs as three batches in parallel with no per-task review gate. A single
 
 Tasks 0 and 1 run **sequentially before** the batches, because every batch depends on the worktree, the gate, and the `tests/test-package.sh` driver.
 
+### Execution amendment: serial batches, one worktree
+
+The three-batch parallel partition below is **superseded for this run**. The task
+graph is very nearly a chain (`2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8`, with
+`3 -> 9 -> 10` and `7,10 -> 11 -> 12 -> 13 -> 14`), so plain numeric order is
+already a valid topological order. Parallelism was only reachable by replacing
+four real dependencies with contract-only stubs and fixtures.
+
+Running serially in one worktree on one branch therefore **retires every
+contract-only relaxation**, and each is replaced by the real dependency:
+
+| Relaxation in the parallel plan | Replaced by, when serial |
+|---|---|
+| Task 8 builds against `tests/fixtures/launcher/template/` | the real `agent-home/` template from Task 3 |
+| Task 8 stubs `generateModelsJson` | the real `lib/config.mjs` from Task 2 |
+| Task 14 calls a fixture depth-verdict endpoint | the real launcher endpoint from Task 8 |
+| Task 11 assumes Task 10's policy contract | the real policy module from Task 10 |
+
+This matters beyond convenience. Every retired stub is one fewer oracle that can
+pass against a mock while the real binary disagrees — the failure mode that
+produced the removed `/rlm-max-depth` interception requirement. Fixtures remain
+required only where the plan uses them for negative and error paths, which no
+real dependency can supply.
+
+Serial batch order, all in the Task 0 worktree on `prime/kit-build-<run-id>`:
+
+| Batch | Tasks | Notes |
+|---|---|---|
+| 1 | 2, 3, 9, 10 | config, extension, vendoring, policy — no launcher dependency |
+| 2 | 4, 5, 6, 7, 8 | launcher chain, with the real template and real config |
+| 3 | 11, 12, 13, 14 | workflow core and adapter, against the real launcher endpoint |
+
+Workers commit and push after every green step. History stays linear, so an
+interrupted run resumes at the last pushed commit with no merge.
+
+
 | Batch | Tasks (sequential within the batch) | Owned paths |
 | --- | --- | --- |
 | **A — launcher chain** | 4, 5, 6, 7, 8 | `prime`, `prime.cmd`, `lib/launcher-process.mjs`, `lib/argv-firewall.mjs`, `lib/worktree.mjs`, `lib/run-registry.mjs`, `lib/launcher.mjs`, `scripts/install-superpowers-package` |
