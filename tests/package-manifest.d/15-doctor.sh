@@ -1,0 +1,7 @@
+package_executable "scripts/doctor"
+package_file "lib/doctor.mjs"
+package_file "tests/doctor.test.mjs"
+package_file "tests/prime-runtime.test.mjs"
+package_directory "tests/fixtures/doctor"
+package_directory "tests/fixtures/runtime-target"
+package_file "tests/package-manifest.d/15-doctor.sh"

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+kit_root=$(cd -- "$script_dir/.." && pwd)
+verify_downloads=0
+live=0
+for arg in "$@"; do
+  case "$arg" in
+    --verify-downloads) verify_downloads=1 ;;
+    --live) live=1 ;;
+    *) printf 'E_USAGE: scripts/doctor [--verify-downloads] [--live]\n' >&2; exit 2 ;;
+  esac
+done
+
+if ((verify_downloads)); then
+  "$kit_root/scripts/bootstrap-toolchain" --verify-downloads
+fi
+
+exec node --input-type=module - "$kit_root" "$live" <<'NODE'
+import { runStaticDoctor } from "./lib/doctor.mjs";
+const [, , kitRoot, live] = process.argv;
+const result = await runStaticDoctor({ kitRoot, env: process.env, live: live === "1" });
+for (const item of result.diagnostics) {
+  process.stdout.write(`${item.state} ${item.code}: ${item.detail}\n`);
+}
+if (!result.ok) process.exitCode = 1;
+NODE
