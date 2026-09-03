@@ -375,3 +375,59 @@ worker refused, which is the only reason this was found. Current gate:
 **146/148, 2 failures**, both downstream of this blocker:
 child lifecycle (no `CHILD_CONTRACT` report) and grandchild-refusal lifecycle
 (no child admitted). The retained depth-two case passes.
+
+## EXEC-EP-3 (BLOCKER, verified) — the kit SIGTERMs Prime on every real run
+
+Escalated from EXEC-EP-2 by the independent review seat and confirmed directly
+in our own code. EXEC-EP-2 understated the damage: this is not "Task 17 cannot
+observe depth", it is **the product does not work at all**.
+
+The production spawn path (`lib/launcher.mjs:640-643`):
+
+```js
+afterSpawn: async () => {
+  const activeSessionId = await waitForParentSession(runtime.daemonSocket, worktree.worktreeRoot);
+  await recordParentSession(join(kitRoot, ".state"), runId, activeSessionId);
+},
+```
+
+`waitForParentSession` retries `discoverParentSession` 100 times at 100 ms
+(`lib/launcher.mjs:489`), i.e. **10 seconds**, then throws
+`E_PARENT_SESSION_UNRESOLVED`. And `lib/launcher-process.mjs:64-71`:
+
+```js
+  await afterSpawn?.(child);
+} catch (error) {
+  child.kill("SIGTERM");
+  ...
+  throw error;
+}
+```
+
+Chain: every firewall-allowed Prime mode is client-owned → a client-owned
+worker is invisible to any client that does not own it
+(`daemon-supervisor.ts:3449`, `3561-3565`) → the launcher is always a different
+client than the child it spawned → discovery can never succeed → after 10
+seconds the launcher **SIGTERMs the Prime process it just started**.
+
+So `prime` starts the agent, stalls ten seconds, kills it, and exits with an
+error. On every run. There is no configuration that avoids this.
+
+**Why 132 green tests did not catch it:** the launcher suite tests discovery
+against a mock net server that implements `list` without Prime's
+owner-match filter (GEMINI-MOCK-1, `tests/launcher.test.mjs:275-345`). The mock
+answers a question the real daemon refuses. This is the same class of defect as
+the removed `/rlm-max-depth` interception requirement — a test that passes
+forever and guarantees nothing — and it is the strongest possible argument for
+the workers' repeated refusal to accept fixture-only greens. Task 17 was the
+first test to touch the real binary on this path, and it failed immediately.
+
+**Implication for EXEC-EP-2's candidates:** any resolution must fix the spawn
+path, not merely the depth verdict. Candidate 3 (drop live daemon observation;
+rely on Prime's in-process refusal at `agent-session.ts:10214-10217`) removes
+`waitForParentSession` from `afterSpawn` entirely and therefore resolves this
+blocker as a side effect. Both review seats independently chose Candidate 3.
+
+Candidate 2 is additionally reported structurally impossible: `promoteOwnedWorker`
+requires the owning client (`daemon-supervisor.ts:2380-2382`) and Prime's
+extension API exposes no daemon connection handle (`types.ts:282-311`).
