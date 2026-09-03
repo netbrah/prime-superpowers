@@ -292,3 +292,13 @@ Note this also means the current `E_DAEMON_UNREACHABLE` code is overloaded: it
 covers both a genuinely unreachable daemon and a reachable daemon that returned
 no matching session. Those deserve distinct codes so a future failure is
 diagnosable without reading Prime's source.
+
+Resolution: launcher parent discovery now sends `includeClientOwned: true` and
+continues to accept exactly one non-subagent session for the requested cwd.
+`E_PARENT_SESSION_UNRESOLVED` is the new fail-closed verdict when the daemon is
+reachable but returns zero or multiple matching parents;
+`E_DAEMON_UNREACHABLE` is retained for connection, identity, timeout, and
+request failures. Startup polling retries both conditions because a reachable
+daemon can legitimately precede publication of the print-mode session. The
+depth-verdict endpoint preserves `E_PARENT_SESSION_UNRESOLVED` rather than
+collapsing it back into `E_DAEMON_UNREACHABLE`.

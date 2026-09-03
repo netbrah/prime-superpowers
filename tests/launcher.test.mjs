@@ -24,6 +24,7 @@ import {
   computeTreeDigest,
   buildModelEnvironment,
   createDepthVerdictServer,
+  discoverParentSession,
   evaluateDepthStatus,
   initializeRunLedger,
   managementArgs,
@@ -332,6 +333,69 @@ test("real Prime 0.8.1 depth protocol is read-only from the launcher client", as
   assert.equal(command.command.type, "get_rlm_max_depth_status");
   assert.equal(command.command.activeSessionId, "parent-secret");
   assert.doesNotMatch(JSON.stringify(command), /set_rlm_max_depth/);
+});
+
+test("parent discovery includes a client-owned print session and keeps exact-one disambiguation", async (t) => {
+  const dir = await temp(t);
+  const socketPath = join(dir, "daemon.sock");
+  const cwd = "/client-owned-worktree";
+  const commands = [];
+  let responseMode = "one";
+  const server = createServer((socket) => {
+    socket.write(`${JSON.stringify({
+      type: "daemon_hello",
+      socketPath,
+      protocol: { name: "prime-agent.daemon", version: 7 },
+      schemaRevision: 11,
+    })}\n`);
+    let input = "";
+    socket.on("data", (chunk) => {
+      input += chunk;
+      const newline = input.indexOf("\n");
+      if (newline < 0) return;
+      const request = JSON.parse(input.slice(0, newline));
+      commands.push(request.command);
+      const clientOwned = [{
+        activeSessionId: "print-parent",
+        cwd,
+        runtimeKind: "interactive",
+      }];
+      const sessions = request.command.includeClientOwned === true
+        ? responseMode === "none"
+          ? []
+          : responseMode === "ambiguous"
+            ? [...clientOwned, { ...clientOwned[0], activeSessionId: "other-parent" }]
+            : clientOwned
+        : [];
+      socket.end(`${JSON.stringify({
+        id: request.id,
+        type: "response",
+        command: "list",
+        success: true,
+        data: {
+          sessions,
+          busyClientOwnedSessionCount: sessions.length,
+        },
+      })}\n`);
+    });
+  });
+  await new Promise((resolveListen) => server.listen(socketPath, resolveListen));
+  t.after(() => server.close());
+
+  assert.equal(await discoverParentSession(socketPath, cwd), "print-parent");
+  assert.equal(commands[0].includeClientOwned, true);
+
+  responseMode = "none";
+  await assert.rejects(
+    discoverParentSession(socketPath, cwd),
+    (error) => error.code === "E_PARENT_SESSION_UNRESOLVED",
+  );
+
+  responseMode = "ambiguous";
+  await assert.rejects(
+    discoverParentSession(socketPath, cwd),
+    (error) => error.code === "E_PARENT_SESSION_UNRESOLVED",
+  );
 });
 
 test("management commands always carry the recorded per-run daemon socket", () => {
