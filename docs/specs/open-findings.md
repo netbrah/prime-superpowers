@@ -248,3 +248,47 @@ reviewed commits to cosmetically repair one. The branch is green at `ac26c42`
 (`git add <path>`), never `git add -A`, while any worker's uncommitted state may
 be present.** Bisecting this branch across `79f7cdc` will hit a red commit;
 the final review should be told so it is not read as a regression.
+
+## EXEC-EP-1 (Blocker, root-caused) — parent discovery omits `includeClientOwned`
+
+Task 17's integrated runtime proof failed with `real daemon did not expose one
+parent session / 0 !== 1`, causing the controller to return
+`{"ok":false,"code":"E_DAEMON_UNREACHABLE"}`. The worker correctly refused to
+stub the depth verdict to force a green.
+
+Root-caused in Prime 0.8.1 source. `daemon-supervisor.ts:2173-2177` filters the
+`list` response:
+
+```ts
+const active = [...this.workers.values()]
+  .filter(
+    (worker) =>
+      this.isVisibleWorker(worker) ||
+      (command.includeClientOwned === true && this.isWorkerAccessibleToClient(client, worker)),
+  )
+```
+
+A print-mode session is **client-owned**, not a "visible worker", so it is
+excluded from `list` unless the client explicitly passes
+`includeClientOwned: true` (`daemon-protocol.ts:377`).
+
+Our launcher never passes it — `lib/launcher.mjs:478`:
+
+```js
+command: { type: "list", all: false, cwd },
+```
+
+**This is our defect, not a Prime limitation and not a sandbox artifact.** The
+parent session existed the whole time; we asked the daemon a question that
+excluded it by construction. Every downstream `E_DAEMON_UNREACHABLE` in the
+integrated proof is a false negative from this one omission.
+
+Fix: pass `includeClientOwned: true` in launcher parent discovery, keep the
+existing "exactly one parent" disambiguation, and re-run Task 17's integrated
+proof unstubbed. `busyClientOwnedSessionCount` is additionally returned when
+the flag is set, which may be useful for the ambiguity check.
+
+Note this also means the current `E_DAEMON_UNREACHABLE` code is overloaded: it
+covers both a genuinely unreachable daemon and a reachable daemon that returned
+no matching session. Those deserve distinct codes so a future failure is
+diagnosable without reading Prime's source.
