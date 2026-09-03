@@ -302,3 +302,76 @@ request failures. Startup polling retries both conditions because a reachable
 daemon can legitimately precede publication of the print-mode session. The
 depth-verdict endpoint preserves `E_PARENT_SESSION_UNRESOLVED` rather than
 collapsing it back into `E_DAEMON_UNREACHABLE`.
+
+## EXEC-EP-2 (BLOCKER, architectural — needs adjudication) — the launcher cannot observe a print-mode session's depth
+
+`includeClientOwned: true` was necessary but not sufficient. Verified in Prime
+0.8.1 source:
+
+```ts
+// daemon-supervisor.ts:3449
+private isVisibleWorker(worker: ResidentWorker): boolean {
+  return worker.descriptor.ownerClientId === undefined;
+}
+
+// daemon-supervisor.ts:3561
+private isWorkerAccessibleToClient(client, worker): boolean {
+  return (
+    worker.descriptor.ownerClientId === undefined ||
+    worker.descriptor.ownerClientId === this.protocolClientId(client)
+  );
+}
+```
+
+`protocolClientId` is a **private hardcoded random identity** minted per client
+connection (`daemon-client.ts:114`):
+
+```ts
+private readonly protocolClientId = `daemon-client:${randomUUID()}`;
+```
+
+A print-mode process owns its session under its own private identity. The
+launcher connects as a *separate* client, so the parent worker is neither
+visible (owner is defined) nor accessible (owner is not the launcher). Prime
+0.8.1 exposes no flag or environment variable to share or predict that identity.
+
+**This invalidates an architectural assumption of the design, not just an
+implementation detail.** The round-6 trust-boundary fix made the launcher the
+sole daemon client and gave it responsibility for reading depth. That is
+unimplementable for a print-mode session, because the launcher can never be the
+owning client of a session it spawned as a child CLI process.
+
+### Candidate resolutions (for tri-model review to adjudicate)
+
+1. **Launcher creates the session through its own daemon client** instead of
+   spawning a print-mode CLI. Ownership then belongs to the launcher, which is
+   exactly the party that needs to query depth. `reuseWorkerForCreate(worker,
+   ownerClientId, ...)` sets the owner at create time. Highest fidelity to the
+   current trust boundary; largest change to the launcher spawn path.
+2. **Extension issues `promote_owned_session`** (`daemon-protocol.ts:414`) from
+   inside the Prime process, which clears `ownerClientId` and makes the worker
+   visible to every client. Cheap. But it widens session exposure to any
+   same-UID client, and it puts a daemon capability back inside the
+   model-influenced process — the precise shape of the OPUS-D6-B1 regression,
+   though `promote_owned_session` is not itself a depth-write.
+3. **Abandon launcher-side depth observation.** Rely on Prime's in-process
+   grandchild refusal (`agent-session.ts:10214-10217`) as the sole enforcement,
+   already independently proven by Task 15, and reduce the launcher's
+   `settings.json` predicates to the tamper check. Smallest code change; means
+   dropping the verdict endpoint and its refusal codes.
+
+### Secondary defect
+
+`lib/workflow-controller.mjs` does not recognize `E_PARENT_SESSION_UNRESOLVED`
+and collapses it back to `E_DAEMON_UNREACHABLE`, hiding the distinction the
+launcher fix just introduced. Outside the authorized file lists for that worker,
+so left unmodified. Fix with whichever resolution is chosen.
+
+### Status
+
+Task 17 is NOT committed and did NOT pass unstubbed. A 3/3 green was reachable
+only by stubbing the depth verdict to `{maxDepth: 1, source: "global"}`; the
+worker refused, which is the only reason this was found. Current gate:
+**146/148, 2 failures**, both downstream of this blocker:
+child lifecycle (no `CHILD_CONTRACT` report) and grandchild-refusal lifecycle
+(no child admitted). The retained depth-two case passes.
