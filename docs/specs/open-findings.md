@@ -431,3 +431,96 @@ blocker as a side effect. Both review seats independently chose Candidate 3.
 Candidate 2 is additionally reported structurally impossible: `promoteOwnedWorker`
 requires the owning client (`daemon-supervisor.ts:2380-2382`) and Prime's
 extension API exposes no daemon connection handle (`types.ts:282-311`).
+
+## ADJUDICATION of EXEC-EP-2 / EXEC-EP-3 — Opus overturns the other two seats
+
+Three independent seats reviewed. Gemini and the independent seat both chose
+**Candidate 3** (drop daemon observation, rely on Prime's in-process grandchild
+refusal). Opus rejected Candidate 3 outright and produced empirical evidence.
+**Opus is correct; Candidate 3 is unsound.** Every load-bearing claim below was
+re-verified by the coordinator in Prime 0.8.1 source.
+
+### 1. Candidate 3's premise is false — in-process refusal is not a guarantee
+
+The refusal at `agent-session.ts:10214` is:
+
+```ts
+if (this._rlmDepth >= this._rlmMaxDepth) { throw ... }
+```
+
+`_rlmMaxDepth` is a **mutable instance field**, and `setRlmMaxDepth` rewrites it
+on the live session (`agent-session.ts:1642-1645`), reachable over the daemon as
+`set_rlm_max_depth` (`daemon-mode.ts:4910-4913`). Raising the limit defeats the
+comparison. It is a check against mutable state, not a structural guard.
+
+Task 15's "independent proof of grandchild refusal" therefore proved something
+weaker than its name claims: that the refusal fires **at the default depth**,
+not that it cannot be lifted. Gemini and the independent seat both reasoned from
+that overstated proof.
+
+### 2. The recorded EXEC-EP-2 premise was wrong — a fourth resolution exists
+
+`open-findings.md` stated Prime "exposes no flag or environment variable to
+share or predict that identity". True, and irrelevant. The supervisor accepts a
+**client-asserted** id with no authentication
+(`daemon-supervisor.ts:1379-1383`):
+
+```ts
+const envelopeClientId = preParsed.envelopeClientId;
+if (envelopeClientId) {
+  this.protocolClientIds.set(client, envelopeClientId);
+  client.id = envelopeClientId;
+}
+```
+
+and the owning `ownerClientId` is persisted to disk in the worker descriptor
+inside our own runtime home (`daemon-worker-protocol.ts:155`). So the launcher
+can read the owner id and assert it — roughly 15 lines in `daemonRequest` —
+recovering discovery **without** abandoning the round-6 trust boundary.
+This is **Candidate 4** and it is the chosen resolution for the functional
+blocker EXEC-EP-3.
+
+### 3. The depth guarantee is not achievable against a hostile model
+
+The same unauthenticated impersonation is available to anything running as the
+same UID, and Prime ships a `bash` tool (`core/tools/bash.ts`). Opus reports a
+live probe against the real 0.8.1 binary in which impersonation succeeded and
+`set_rlm_max_depth` raised depth 1 → 7, rewriting `settings.json` inside the
+integrity-checked runtime home. Every element of that chain is confirmed in
+source above.
+
+Consequence: **no launcher-side mechanism can enforce depth against a
+deliberate agent on the same UID.** The layered guarantee recorded earlier in
+this document is false as written, and `design.md:231`'s claim that depth is
+"not bypassable by the coordinator" must be removed, not softened.
+
+What the kit can honestly claim: depth is enforced against *accidental*
+recursion, and tampering is *detected* after the fact by the launcher's semantic
+`settings.json` predicates. A guarantee against a hostile model requires OS-level
+isolation (separate UID, container, or seccomp) and is out of scope for
+Prime 0.8.1.
+
+### 4. Third blocker — the committed artifact hides its own failing suite
+
+Confirmed by the coordinator. `git archive d9fd59e` into a clean tree gates with
+`suite=rlm-runtime state=skipped`, because Task 17's test *and* its marker are
+both untracked and `scripts/gate:94-100` skips silently when neither is present.
+The failing suite disappears from the artifact that would ship.
+
+Coordinator discrepancy, recorded honestly: Opus reports the clean archive gates
+`145 pass / 0 fail, exit 0`. The coordinator's clean-archive run exited **1**
+with several suite failures, though `rlm-runtime state=skipped` reproduced
+exactly. The skip hazard is confirmed; the precise clean-tree pass/fail line is
+not, and likely depends on how `toolchain/node_modules` was provisioned into the
+archive. The gate's silent-skip behaviour is the defect either way: absence of a
+suite must not be indistinguishable from success.
+
+### Resolution to implement
+
+1. **Candidate 4** for discovery: read `ownerClientId` from the on-disk worker
+   descriptor and assert it in `daemonRequest`. Fixes EXEC-EP-3, keeps the
+   round-6 boundary, removes the 10-second-then-SIGTERM failure.
+2. **Correct the security claims** in `design.md` (including line 231) and in
+   this register. State detection, not prevention.
+3. **Fix the gate's silent skip** so an untracked or missing suite fails closed.
+4. **Re-run Task 17 unstubbed** once discovery works.
